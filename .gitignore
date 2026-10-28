@@ -12,3 +12,9 @@ dist/
 
 # plugin runtime artifacts created by CWD-relative third-party plugins
 plugins/
+
+# internal working records (kept local, excluded from the public plugin repo)
+TASKS.md
+AGENTS.local.md
+CLAUDE.md
+archives/
