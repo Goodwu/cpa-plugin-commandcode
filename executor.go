@@ -54,6 +54,30 @@ func credentialFrom(req executorRequest) (credential, error) {
 	return credential{APIKey: key, APIBase: storage.BaseURL}, nil
 }
 
+// stripModelPrefix removes the plugin's own namespacing prefixes from a
+// client-requested model id. With host force-model-prefix, clients send
+// "<auth-prefix>/<org>/<model>" or "<provider>/<org>/<model>" and the
+// translated payload may keep that prefix; CC rejects it ("Model/provider
+// not recognized"). Repeated stripping handles stacked prefixes.
+func stripModelPrefix(model, authPrefix string) string {
+	model = strings.TrimSpace(model)
+	prefixes := make([]string, 0, 2)
+	if p := strings.TrimSpace(authPrefix); p != "" && p != authProviderID {
+		prefixes = append(prefixes, p+"/")
+	}
+	prefixes = append(prefixes, authProviderID+"/")
+	for changed := true; changed; {
+		changed = false
+		for _, p := range prefixes {
+			if rest, ok := strings.CutPrefix(model, p); ok && rest != "" {
+				model = rest
+				changed = true
+			}
+		}
+	}
+	return model
+}
+
 // decodeChatRequest extracts the chat-completions payload the host translated
 // for this executor (Payload), falling back to the raw client body when the
 // host passed the request through unchanged.
@@ -73,6 +97,7 @@ func decodeChatRequest(req executorRequest) (*chatRequest, string, error) {
 	if model == "" {
 		model = req.Model
 	}
+	chat.Model = stripModelPrefix(model, req.AuthAttributes["prefix"])
 	return &chat, model, nil
 }
 

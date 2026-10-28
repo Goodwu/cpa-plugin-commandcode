@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // cliNodeVersion is the Node.js version advertised in the CLI-identifying
@@ -36,7 +37,6 @@ func buildUpstreamHeaders(apiKey, cliVersion string, body *ccRequestBody) map[st
 	return map[string][]string{
 		"Content-Type":           {"application/json"},
 		"Accept":                 {"application/json, */*"},
-		"Accept-Encoding":        {"gzip, deflate, br"},
 		"Accept-Language":        {"en-US,en;q=0.9"},
 		"Connection":             {"keep-alive"},
 		"User-Agent":             {fmt.Sprintf("commandcode-cli/%s Node.js/%s", cliVersion, cliNodeVersion)},
@@ -271,19 +271,44 @@ func sanitizeErrorText(text, apiKey string) string {
 	}
 	var b strings.Builder
 	for _, r := range text {
-		if r < 0x20 && r != '\t' && r != '\n' {
+		if r <= 0x7f {
+			if r < 0x20 && r != '\t' && r != '\n' {
+				continue
+			}
+			b.WriteRune(r)
 			continue
 		}
-		if r == 0x7f {
-			continue
-		}
-		b.WriteRune(r)
+		b.WriteRune(utf8.RuneError)
 	}
 	result := b.String()
 	if len(result) > maxErrorBodyBytes {
 		result = result[:maxErrorBodyBytes]
 	}
+	// Compressible error bodies (gzip/br) pass through the host HTTP bridge as
+	// raw bytes. Keep a hex preview so diagnostics survive the text pipeline.
+	if !isMostlyPrintable(result) {
+		raw := []byte(text)
+		if len(raw) > 64 {
+			raw = raw[:64]
+		}
+		return "[non-text body " + hex.EncodeToString(raw) + "]"
+	}
 	return result
+}
+
+func isMostlyPrintable(s string) bool {
+	good := 0
+	total := 0
+	for _, r := range s {
+		total++
+		if r == '\t' || r == '\n' || r >= 0x20 && r != 0x7f {
+			good++
+		}
+	}
+	if total == 0 {
+		return true
+	}
+	return good*10 >= total*8 // >=80% printable
 }
 
 // newStatusError adapts an HTTP status for callers that branch on errors.
