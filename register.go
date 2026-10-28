@@ -43,8 +43,8 @@ func registrationPayload() registrationResponse {
 	resp.Metadata = pluginMetadata{
 		Name:             pluginID,
 		Version:          pluginVersion,
-		Author:           "wuweiwei1",
-		GitHubRepository: "https://github.com/wuweiwei1/cpa-plugin-commandcode",
+		Author:           "Goodwu",
+		GitHubRepository: "https://github.com/Goodwu/cpa-plugin-commandcode",
 		ConfigFields: []configField{
 			{Name: "api_base", Type: "string", Description: "Command Code API base URL (default https://api.commandcode.ai)."},
 			{Name: "cli_version", Type: "string", Description: "Pinned x-command-code-version. Empty = auto-refresh from the npm registry."},
