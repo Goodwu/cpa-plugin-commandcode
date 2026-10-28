@@ -1,0 +1,112 @@
+# commandcode-go — CLIProxyAPI 插件
+
+把 **CommandCode 订阅**（`/alpha/generate` 私有 CLI 协议）接入 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)。装好后，任何 CPA 支持的客户端（OpenAI Chat Completions、Claude Messages、Codex Responses 等）都能直接使用你的 CommandCode 订阅额度跑 DeepSeek / GLM / Kimi / MiniMax / Qwen 等模型。
+
+协议转换逻辑移植自 [thaolaptrinh/commandcode-api-proxy](https://github.com/thaolaptrinh/commandcode-api-proxy)（独立 Node 代理），本项目是它的 CPA 原生插件形态：进程内动态库、复用宿主的凭证池、调度、代理、日志与协议翻译，不再需要单独跑一个 8787 端口的代理进程。
+
+## 与商店 `commandcode` 插件的区别
+
+| | `commandcode`（ahoo） | **`commandcode-go`（本插件）** |
+|---|---|---|
+| 上游端点 | `/provider/v1/chat/completions` | `/alpha/generate` |
+| 需要的订阅 | Provider 付费层 | 标准订阅（含 Go） |
+| 形态 | API key 直连 | CLI 指纹头 + 事件流翻译 |
+
+插件 ID 不同，两者可以共存安装。
+
+## 前提
+
+- CLIProxyAPI 需要是支持动态库插件的 CGO 构建：`curl -sI http://localhost:8317/v0/management/plugins | grep X-CPA-SUPPORT-PLUGIN` 显示 `1`。
+- macOS / Linux / Windows（amd64 / arm64）。
+
+## 构建安装
+
+```bash
+make build
+make install PLUGINS_DIR=/path/to/cliproxyapi/plugins
+```
+
+发布产物（四平台 zip + checksums，符合插件商店格式）：
+
+```bash
+make package-darwin-arm64 package-darwin-amd64 package-linux-amd64 package-linux-arm64
+```
+
+## 配置
+
+`config.yaml`：
+
+```yaml
+plugins:
+  enabled: true
+  dir: plugins
+  configs:
+    commandcode-go:
+      enabled: true
+      # api_base: "https://api.commandcode.ai"  # 可选：改上游地址
+      # cli_version: "0.40.3"                   # 可选：钉死 CLI 版本（默认自动从 npm 刷新，24h 缓存）
+      # idle_timeout_ms: 120000                 # 可选：流式块间超时，0 关闭
+      # max_retries: 2                          # 可选：流开始前的上游重试次数
+      # project_slug: "my-project"              # 可选：x-project-slug 头
+```
+
+## 凭证
+
+API key 从 https://commandcode.ai/settings 获取，写入宿主 auth 目录（默认 `~/.cli-proxy-api`）：
+
+```bash
+cat > ~/.cli-proxy-api/commandcode-go-main.json <<'JSON'
+{"type":"commandcode-go","api_key":"<你的 key>","label":"main"}
+JSON
+```
+
+重启 CPA 即生效。支持多文件多 key（宿主负责轮转与失败切换）；每个 auth 文件可用 `"base_url"` 字段单独覆盖上游地址。无交互式登录：`auth.login.*` 明确返回不支持。
+
+## 使用
+
+模型 ID 以 `GET /v1/models` 为准（完整 ID，如 `deepseek/deepseek-v4-pro`）。别名（`deepseek-v4-pro`、`glm5.2` 等）由插件内部解析，但**客户端必须请求 CPA 已注册的完整 ID**，否则宿主机由不会把它路由到本插件。
+
+```bash
+curl -s http://localhost:8317/v1/chat/completions \
+  -H "Authorization: Bearer <cpa-key>" -H "Content-Type: application/json" \
+  -d '{"model":"deepseek/deepseek-v4-pro","messages":[{"role":"user","content":"say hi"}],"stream":true}'
+```
+
+Claude Code / Codex / 任意 OpenAI 兼容客户端按 CPA 常规方式接即可；Anthropic 请求的 `thinking` 与工具调用会经由宿主翻译层与插件的 `reasoning_content` / tool-call 增量合并对接。
+
+## 行为说明
+
+- **上游恒为流式**：非流式请求由插件聚合 CC 事件后返回完整 `chat.completion`。
+- **推理链**：`reasoning-delta` → `reasoning_content`，供 Claude 侧渲染 thinking。
+- **并行工具调用**：按 `toolCallId` 分配稳定流式 index，`tool-call` 终态与增量做一致性合并。
+- **reliability**：5xx/429/传输错误仅在流开始前重试（线性退避）；块间 idle 超时合成 finish；上游 error 事件以合法 chunk 形态（`[upstream error] ...` + finish）送达客户端；错误信息脱敏 API key。
+- **凭证安全**：key 只从执行请求的 `StorageJSON` 即用即弃，不复制进宿主属性；日志不输出 key 或原始凭证。
+- **CLI 指纹**：`User-Agent: commandcode-cli/<ver>`、`x-command-code-version` 等头缺一不可（上游会拒绝疑似代理流量），版本号自动从 npm 刷新。
+- 与参考实现一致，本插件默认面向**本机/受信网络**部署；`/alpha/generate` 不是公开 API，请自行评估暴露风险。
+
+## 开发
+
+```
+main.go            CGO ABI 骨架（cliproxy_plugin_init/call/free/shutdown）
+hostbridge.go      宿主回调封装（host.http.*、host.stream.*、host.log）
+rpc.go             JSON envelope 与线上传输类型
+register.go        能力声明与 RPC 路由
+config.go          插件自有 YAML 配置（标量行扫描，零依赖）
+auth.go / storage.go   API-key 凭证文件 ⇄ AuthData
+catalog.go / catalog.json  静态模型目录 + 别名 + effort 表（可被 provider API 动态合并）
+models.go          model.static / model.for_auth
+upstream.go        /alpha/generate 请求、指纹头、重试、NDJSON 流泵
+events.go          事件行解析（扁平/嵌套双形态）
+translate_request.go   chat-completions → CC 请求体
+translate_stream.go    CC 事件 → chat.completion.chunk / 非流式聚合
+executor.go        executor.execute / execute_stream / count_tokens
+version.go         npm CLI 版本刷新
+```
+
+```bash
+go test ./...   # 转换层、目录、凭证、RPC 单测
+```
+
+## License
+
+MIT

@@ -1,0 +1,11 @@
+AGENTS.md
+bin/
+build/
+dist/
+.cache/
+*.dylib
+*.so
+*.dll
+*.h.gch
+.DS_Store
+.commandcode/
