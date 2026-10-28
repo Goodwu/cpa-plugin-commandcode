@@ -9,6 +9,47 @@ import (
 	"unicode/utf8"
 )
 
+// sessionHeaderNames are the client headers that identify a conversation.
+// Reusing one as the upstream x-session-id keeps a session (and its prompt
+// cache) continuous across turns instead of minting a new thread per request.
+var sessionHeaderNames = []string{
+	"X-Session-Id",
+	"X-Claude-Code-Session-Id",
+	"Session-Id",
+	"X-Conversation-Id",
+	"Conversation-Id",
+	"X-Client-Request-Id",
+}
+
+// sessionThreadID returns the upstream thread id: the client's session header
+// when present and well-formed, otherwise a fresh UUID.
+func sessionThreadID(req executorRequest) string {
+	headers := http.Header(req.Headers)
+	for _, name := range sessionHeaderNames {
+		if id, ok := sanitizeSessionID(headers.Get(name)); ok {
+			return id
+		}
+	}
+	return newUUID()
+}
+
+// sanitizeSessionID accepts session ids that are safe to replay as a request
+// header value (printable, bounded length).
+func sanitizeSessionID(raw string) (string, bool) {
+	id := strings.TrimSpace(raw)
+	if len(id) < 8 || len(id) > 128 {
+		return "", false
+	}
+	for _, r := range id {
+		safe := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			r == '-' || r == '_' || r == '.' || r == ':'
+		if !safe {
+			return "", false
+		}
+	}
+	return id, true
+}
+
 // resolveAPIBase lets an auth file pin its own upstream base; the plugin
 // config provides the default for all credentials.
 func resolveAPIBase(storageBase, configBase string) string {
@@ -119,7 +160,7 @@ func handleExecute(request []byte) ([]byte, error) {
 		return errorEnvelope("bad_request", errDecode.Error()), nil
 	}
 	cfg := activeConfig()
-	body := toCCRequest(chat, newUUID())
+	body := toCCRequest(chat, sessionThreadID(req))
 	open, errOpen := openUpstreamStream(req.HostCallbackID, resolveAPIBase(creds.APIBase, cfg.APIBase), creds.APIKey, &body)
 	if errOpen != nil {
 		return executorFailureEnvelope(errOpen), nil
@@ -182,7 +223,7 @@ func handleExecuteStream(request []byte) ([]byte, error) {
 		return errorEnvelope("bad_request", errDecode.Error()), nil
 	}
 	cfg := activeConfig()
-	body := toCCRequest(chat, newUUID())
+	body := toCCRequest(chat, sessionThreadID(req))
 	open, errOpen := openUpstreamStream(req.HostCallbackID, resolveAPIBase(creds.APIBase, cfg.APIBase), creds.APIKey, &body)
 	if errOpen != nil {
 		return executorFailureEnvelope(errOpen), nil

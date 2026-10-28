@@ -80,6 +80,7 @@ Claude Code / Codex / 任意 OpenAI 兼容客户端按 CPA 常规方式接即可
 - **Anthropic 原生输出**：宿主没有注册 chat-completions→anthropic 的**流式** transformer，插件因此声明 `anthropic` 输出格式并为 Claude 客户端直接产出原生 SSE 事件（`message_start`/`content_block_*`/`message_delta`/`message_stop`，thinking 用 `thinking_delta`、工具用 `input_json_delta`、usage 按 message_start/message_delta 拆分）。
 - **异步流泵**：`executor.execute_stream` 打开上游（同步，保留流前错误的 HTTP 状态语义）后立即返回，chunk 在后台 goroutine 经 `host.stream.emit` 推送——宿主 stream bridge 队列仅 16，在 RPC 内同步泵会在长流上死锁。
 - **推理链**：`reasoning-delta` → OpenAI `reasoning_content` / Anthropic thinking block。
+- **会话亲和**：客户端带回话头（`X-Session-Id`、`X-Claude-Code-Session-Id`、`Conversation-Id` 等）时复用作上游 `x-session-id`，同一会话跨轮次保持连续并利于上游缓存；缺失或非法时回退新 UUID。
 - **并行工具调用**：按 `toolCallId` 分配稳定流式 index，`tool-call` 终态与增量做一致性合并（含 id/name 未知的缓冲兜底）。
 - **reliability**：5xx/429/传输错误仅在流开始前重试（线性退避）；块间 idle 超时合成 finish；上游 error 事件以合法流形态送达客户端；错误信息脱敏 API key；客户端断连立即关闭上游流、停止烧额度。
 - **凭证安全**：key 只从执行请求的 `StorageJSON` 即用即弃，不复制进宿主属性；日志不输出 key 或原始凭证。
@@ -88,7 +89,7 @@ Claude Code / Codex / 任意 OpenAI 兼容客户端按 CPA 常规方式接即可
 
 ## 验证状态
 
-真实订阅 key 端到端验收已通过（2026-10-28，CPA 源码 v7.2.141 沙箱实例）：OpenAI/Claude 双 surface 流式与非流式、thinking 块、工具调用流、usage 明细、断连清理均正常。
+真实订阅 key 端到端验收已通过（2026-10-28，CPA 源码 v7.2.141 沙箱实例，以及生产 brew v8.0.40 实例）：OpenAI Chat Completions、Claude Messages、Codex Responses 三个 surface 的流式与非流式、thinking 块、工具调用流、usage 明细、断连清理均正常。
 
 ## 开发
 
