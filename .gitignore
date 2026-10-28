@@ -14,7 +14,6 @@ dist/
 plugins/
 
 # internal working records (kept local, excluded from the public plugin repo)
-TASKS.md
 AGENTS.local.md
 CLAUDE.md
 archives/
