@@ -9,3 +9,6 @@ dist/
 *.h.gch
 .DS_Store
 .commandcode/
+
+# plugin runtime artifacts created by CWD-relative third-party plugins
+plugins/
