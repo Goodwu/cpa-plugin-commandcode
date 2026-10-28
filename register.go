@@ -58,7 +58,11 @@ func registrationPayload() registrationResponse {
 	resp.Capabilities.Executor = true
 	resp.Capabilities.ExecutorModelScope = "both"
 	resp.Capabilities.ExecutorInputFormats = []string{"chat-completions"}
-	resp.Capabilities.ExecutorOutputFormats = []string{"chat-completions"}
+	// Anthropic clients need the plugin to emit Claude SSE natively: the host
+	// registers no chat-completions→anthropic STREAM response transformer, so
+	// declaring "anthropic" makes selectExecutorOutputFormat choose passthrough
+	// for Claude requests instead of an empty in-host translation.
+	resp.Capabilities.ExecutorOutputFormats = []string{"chat-completions", "anthropic"}
 	return resp
 }
 

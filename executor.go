@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -119,7 +120,16 @@ func handleExecute(request []byte) ([]byte, error) {
 	if agg.Finish == "" {
 		agg.Finish = "stop"
 	}
-	response := buildNonStreamingResponse(body.Params.Model, agg)
+	// Anthropic clients with output format "anthropic" get a native Claude
+	// message; the host passes plugin output through when it matches the
+	// requested format (and its chat→claude non-stream transformer is
+	// available for other paths, but streaming has no such transformer).
+	var response map[string]any
+	if isClaudeFormat(req.Format) {
+		response = buildClaudeNonStreaming(body.Params.Model, agg)
+	} else {
+		response = buildNonStreamingResponse(body.Params.Model, agg)
+	}
 	payload := marshalJSON(response)
 	return okEnvelope(executorResponse{
 		Payload: payload,
@@ -153,16 +163,44 @@ func handleExecuteStream(request []byte) ([]byte, error) {
 		return executorFailureEnvelope(errOpen), nil
 	}
 
-	encoder := newStreamEncoder(body.Params.Model)
+	// Select the output encoder by the format the host asked this executor to
+	// produce. Claude clients get raw Anthropic SSE frames (the host has no
+	// chat→claude STREAM transformer, so passthrough of chat chunks would be
+	// empty); everything else gets chat.completion.chunk.
+	var encoder chunkEmitter
+	var term terminator
+	if isClaudeFormat(req.Format) {
+		ce := newClaudeEncoder(body.Params.Model)
+		encoder, term = ce, ce
+	} else {
+		oe := newStreamEncoder(body.Params.Model)
+		encoder, term = oe, oe
+	}
+
+	// The host only consumes stream-bridge chunks AFTER this RPC returns, and
+	// the bridge queue holds 16 — pumping synchronously here deadlocks on the
+	// 17th chunk (rpc_client_stream.go: "Async streaming plugins can return
+	// before they finish emitting chunks, so keep callbacks alive until the
+	// stream ends"). Open the upstream synchronously so pre-stream failures
+	// still carry HTTP status, then return and pump in the background.
+	go pumpStreamAsync(req.StreamID, open.StreamID, cfg.IdleTimeout, encoder, term)
+
+	return okEnvelope(executorStreamOpenResponse{
+		Headers: map[string][]string{"content-type": {"text/event-stream"}},
+	})
+}
+
+// pumpStreamAsync drains the upstream NDJSON stream and forwards encoded
+// chunks to the host stream bridge until finish, error, or disconnect.
+func pumpStreamAsync(outputStreamID, upstreamStreamID string, idleTimeout time.Duration, encoder chunkEmitter, term terminator) {
+	defer hostHTTPStreamClose(upstreamStreamID)
+
 	emitChunk := func(chunk []byte) error {
-		if err := hostStreamEmit(req.StreamID, chunk); err != nil {
-			return err
-		}
-		return nil
+		return hostStreamEmit(outputStreamID, chunk)
 	}
 
 	disconnected := false
-	pumpErr := pumpUpstream(open.StreamID, cfg.IdleTimeout, func(event ccEvent) error {
+	pumpErr := pumpUpstream(upstreamStreamID, idleTimeout, func(event ccEvent) error {
 		chunks, errEncode := encoder.emit(event)
 		if errEncode != nil {
 			return errEncode
@@ -173,38 +211,36 @@ func handleExecuteStream(request []byte) ([]byte, error) {
 					disconnected = true
 					return errStreamDisconnected
 				}
+				hostLog("warn", fmt.Sprintf("commandcode-go: stream emit failed: %v", err))
 				return err
 			}
 		}
 		return nil
 	})
-	// The client is gone: nothing left to deliver, just release upstream.
-	hostHTTPStreamClose(open.StreamID)
 
 	if disconnected {
-		hostStreamClose(req.StreamID, "")
-		return okEnvelope(executorStreamOpenResponse{})
+		// The client is gone: nothing left to deliver, just release upstream.
+		hostStreamClose(outputStreamID, "")
+		return
 	}
 
-	switch {
-	case pumpErr != nil && !encoder.finished():
-		for _, chunk := range encoder.errorChunks(pumpErr.Error()) {
-			_ = hostStreamEmit(req.StreamID, chunk)
+	if pumpErr != nil {
+		if !encoder.finished() {
+			for _, chunk := range term.failStream(pumpErr.Error()) {
+				_ = hostStreamEmit(outputStreamID, chunk)
+			}
 		}
-		hostStreamClose(req.StreamID, "")
-	case pumpErr == nil && !encoder.finished():
+		hostStreamClose(outputStreamID, "")
+		return
+	}
+	if !encoder.finished() {
 		// Upstream closed without a finish event: synthesize the terminator so
 		// client SDKs never see a truncated stream shape.
-		for _, chunk := range encoder.finishChunks("stop") {
-			_ = hostStreamEmit(req.StreamID, chunk)
+		for _, chunk := range term.forceFinish() {
+			_ = hostStreamEmit(outputStreamID, chunk)
 		}
-		hostStreamClose(req.StreamID, "")
-	default:
-		hostStreamClose(req.StreamID, "")
 	}
-	return okEnvelope(executorStreamOpenResponse{
-		Headers: map[string][]string{"content-type": {"text/event-stream"}},
-	})
+	hostStreamClose(outputStreamID, "")
 }
 
 var errStreamDisconnected = fmt.Errorf("commandcode-go: client stream closed")

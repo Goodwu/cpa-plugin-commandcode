@@ -260,6 +260,23 @@ func (e *streamEncoder) finishChunks(reason string) [][]byte {
 	return e.encodeChunk(map[string]any{}, ptrString(reason))
 }
 
+// forceFinish satisfies the shared terminator interface for the OpenAI encoder.
+func (e *streamEncoder) forceFinish() [][]byte {
+	if e.finished() {
+		return nil
+	}
+	return e.finishChunks("stop")
+}
+
+// failStream surfaces a mid-stream failure as the uniform content+finish
+// chunk pair so the client always sees a legal stream shape.
+func (e *streamEncoder) failStream(message string) [][]byte {
+	if e.finished() {
+		return nil
+	}
+	return e.errorChunks(message)
+}
+
 func openAIUsage(usage *usageData) map[string]any {
 	result := map[string]any{}
 	prompt := 0

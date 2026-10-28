@@ -46,7 +46,7 @@ func TestDispatchRegistration(t *testing.T) {
 	if strings.Join(reg.Capabilities.ExecutorInputFormats, ",") != "chat-completions" {
 		t.Fatalf("input formats = %v", reg.Capabilities.ExecutorInputFormats)
 	}
-	if strings.Join(reg.Capabilities.ExecutorOutputFormats, ",") != "chat-completions" {
+	if strings.Join(reg.Capabilities.ExecutorOutputFormats, ",") != "chat-completions,anthropic" {
 		t.Fatalf("output formats = %v", reg.Capabilities.ExecutorOutputFormats)
 	}
 }

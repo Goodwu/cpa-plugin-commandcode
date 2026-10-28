@@ -72,17 +72,23 @@ curl -s http://localhost:8317/v1/chat/completions \
   -d '{"model":"deepseek/deepseek-v4-pro","messages":[{"role":"user","content":"say hi"}],"stream":true}'
 ```
 
-Claude Code / Codex / 任意 OpenAI 兼容客户端按 CPA 常规方式接即可；Anthropic 请求的 `thinking` 与工具调用会经由宿主翻译层与插件的 `reasoning_content` / tool-call 增量合并对接。
+Claude Code / Codex / 任意 OpenAI 兼容客户端按 CPA 常规方式接即可；Anthropic 流/非流均由插件原生产出（见「行为说明」）。
 
 ## 行为说明
 
-- **上游恒为流式**：非流式请求由插件聚合 CC 事件后返回完整 `chat.completion`。
-- **推理链**：`reasoning-delta` → `reasoning_content`，供 Claude 侧渲染 thinking。
-- **并行工具调用**：按 `toolCallId` 分配稳定流式 index，`tool-call` 终态与增量做一致性合并。
-- **reliability**：5xx/429/传输错误仅在流开始前重试（线性退避）；块间 idle 超时合成 finish；上游 error 事件以合法 chunk 形态（`[upstream error] ...` + finish）送达客户端；错误信息脱敏 API key。
+- **上游恒为流式**：非流式请求由插件聚合 CC 事件后返回完整响应（OpenAI `chat.completion` / Anthropic message）。
+- **Anthropic 原生输出**：宿主没有注册 chat-completions→anthropic 的**流式** transformer，插件因此声明 `anthropic` 输出格式并为 Claude 客户端直接产出原生 SSE 事件（`message_start`/`content_block_*`/`message_delta`/`message_stop`，thinking 用 `thinking_delta`、工具用 `input_json_delta`、usage 按 message_start/message_delta 拆分）。
+- **异步流泵**：`executor.execute_stream` 打开上游（同步，保留流前错误的 HTTP 状态语义）后立即返回，chunk 在后台 goroutine 经 `host.stream.emit` 推送——宿主 stream bridge 队列仅 16，在 RPC 内同步泵会在长流上死锁。
+- **推理链**：`reasoning-delta` → OpenAI `reasoning_content` / Anthropic thinking block。
+- **并行工具调用**：按 `toolCallId` 分配稳定流式 index，`tool-call` 终态与增量做一致性合并（含 id/name 未知的缓冲兜底）。
+- **reliability**：5xx/429/传输错误仅在流开始前重试（线性退避）；块间 idle 超时合成 finish；上游 error 事件以合法流形态送达客户端；错误信息脱敏 API key；客户端断连立即关闭上游流、停止烧额度。
 - **凭证安全**：key 只从执行请求的 `StorageJSON` 即用即弃，不复制进宿主属性；日志不输出 key 或原始凭证。
 - **CLI 指纹**：`User-Agent: commandcode-cli/<ver>`、`x-command-code-version` 等头缺一不可（上游会拒绝疑似代理流量），版本号自动从 npm 刷新。
 - 与参考实现一致，本插件默认面向**本机/受信网络**部署；`/alpha/generate` 不是公开 API，请自行评估暴露风险。
+
+## 验证状态
+
+真实订阅 key 端到端验收已通过（2026-10-28，CPA 源码 v7.2.141 沙箱实例）：OpenAI/Claude 双 surface 流式与非流式、thinking 块、工具调用流、usage 明细、断连清理均正常。
 
 ## 开发
 
@@ -99,6 +105,7 @@ upstream.go        /alpha/generate 请求、指纹头、重试、NDJSON 流泵
 events.go          事件行解析（扁平/嵌套双形态）
 translate_request.go   chat-completions → CC 请求体
 translate_stream.go    CC 事件 → chat.completion.chunk / 非流式聚合
+translate_claude.go    CC 事件 → Anthropic 原生 SSE / 非流式 message（Claude 面）
 executor.go        executor.execute / execute_stream / count_tokens
 version.go         npm CLI 版本刷新
 ```
