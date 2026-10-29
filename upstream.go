@@ -85,7 +85,7 @@ func slugifyWorkingDir(workingDir any) string {
 // openUpstreamStream POSTs the CC generate body and returns the opened host
 // HTTP stream. Retryable failures (5xx/429/transport) are retried with linear
 // backoff, but only before any chunk has been consumed.
-func openUpstreamStream(callbackID, apiBase, apiKey string, body *ccRequestBody) (hostHTTPStreamOpen, error) {
+func openUpstreamStream(callbackID, apiBase, apiKey, authID string, body *ccRequestBody) (hostHTTPStreamOpen, error) {
 	cfg := activeConfig()
 	cliVersion := currentCLIVersion(callbackID)
 	raw, errMarshal := json.Marshal(body)
@@ -123,6 +123,9 @@ func openUpstreamStream(callbackID, apiBase, apiKey string, body *ccRequestBody)
 		// Consume the error body (bounded) before deciding on a retry so the
 		// upstream connection is released and diagnostics survive.
 		errorText := drainErrorBody(open.StreamID, apiKey)
+		if open.StatusCode == 429 {
+			recordRateLimitFromBody(authID, errorText)
+		}
 		retryable := open.StatusCode >= 500 || open.StatusCode == 429
 		lastErr = &upstreamFailure{
 			Status:    open.StatusCode,

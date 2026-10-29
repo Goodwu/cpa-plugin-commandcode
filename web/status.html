@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CommandCode · 状态与额度</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d2129; --line:#2a2f3a;
+    --text:#e6e9ef; --dim:#8b93a3; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --accent:#58a6ff;
+  }
+  @media (prefers-color-scheme: light){
+    :root{--bg:#f5f6f8;--panel:#fff;--panel2:#f0f2f5;--line:#dfe3ea;--text:#1f2328;--dim:#6b7280;}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:24px;background:var(--bg);color:var(--text);
+       font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif}
+  h1{font-size:18px;margin:0 0 4px}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin:24px 0 10px;font-weight:600}
+  .wrap{max-width:1040px;margin:0 auto}
+  .muted{color:var(--dim)}
+  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .spacer{flex:1}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+  .kv{display:flex;justify-content:space-between;gap:12px;padding:3px 0}
+  .kv span:first-child{color:var(--dim)}
+  button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;
+         padding:6px 12px;cursor:pointer;font-size:13px}
+  button:hover{border-color:var(--accent)}
+  input{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px;min-width:240px}
+  .badge{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;border:1px solid var(--line);color:var(--dim)}
+  .badge.live{color:var(--ok);border-color:var(--ok)}
+  .badge.estimated{color:var(--warn);border-color:var(--warn)}
+  .bar{height:8px;background:var(--panel2);border-radius:999px;overflow:hidden;margin:8px 0 4px}
+  .bar > i{display:block;height:100%;background:var(--ok);width:0}
+  .bar.warn > i{background:var(--warn)}
+  .bar.bad > i{background:var(--bad)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  th{color:var(--dim);font-weight:600}
+  td.err{white-space:normal;max-width:420px;overflow:hidden;text-overflow:ellipsis}
+  .num{font-variant-numeric:tabular-nums}
+  .toast{margin-top:12px;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);display:none}
+  .toast.show{display:block}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="row">
+    <div>
+      <h1>CommandCode 插件状态</h1>
+      <div class="muted" id="subtitle">加载中…</div>
+    </div>
+    <div class="spacer"></div>
+    <button id="refresh">刷新</button>
+    <button id="reset">清空本地统计</button>
+  </div>
+
+  <div id="authBox" class="panel" style="margin-top:16px;display:none">
+    <div class="row">
+      <strong>需要管理密钥</strong>
+      <span class="muted">页面无法复用管理中心保存的密钥，请手动输入。</span>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <input id="key" type="password" placeholder="管理密钥（仅保存在本标签页）">
+      <button id="save">保存并加载</button>
+    </div>
+  </div>
+
+  <div id="content" style="display:none">
+    <h2>插件</h2>
+    <div class="grid">
+      <div class="panel" id="pluginInfo"></div>
+      <div class="panel" id="upstreamInfo"></div>
+      <div class="panel" id="modelInfo"></div>
+    </div>
+
+    <h2>额度</h2>
+    <div id="quotaBox" class="grid"></div>
+
+    <h2>统计</h2>
+    <div class="grid">
+      <div class="panel" id="totals"></div>
+      <div class="panel" id="tokens"></div>
+    </div>
+
+    <h2>最近请求</h2>
+    <div class="panel" style="overflow:auto">
+      <table>
+        <thead><tr><th>时间</th><th>模型</th><th>流式</th><th>状态</th><th>耗时</th><th>错误</th></tr></thead>
+        <tbody id="recent"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var API = "/v0/management/plugins/commandcode-go/status";
+  var RESET_API = "/v0/management/plugins/commandcode-go/reset-stats";
+  var storageKeys = ["cli-proxy-auth", "management-key", "cpa-management-key", "cpa-management-secret"];
+  var keyCache = null;
+  var timer = null;
+
+  function el(id) { return document.getElementById(id); }
+  function text(node, value) { node.textContent = value == null ? "" : String(value); }
+  function toast(msg) {
+    var t = el("toast");
+    text(t, msg);
+    t.classList.add("show");
+    setTimeout(function () { t.classList.remove("show"); }, 3200);
+  }
+
+  function extractKey(raw) {
+    if (!raw) return "";
+    var value = String(raw).trim();
+    if (value.charAt(0) === "{") {
+      try {
+        var parsed = JSON.parse(value);
+        return parsed.key || parsed.password || parsed.secret || parsed.managementKey || "";
+      } catch (e) { return ""; }
+    }
+    return value;
+  }
+
+  function managementKey() {
+    if (keyCache) return keyCache;
+    for (var i = 0; i < storageKeys.length; i++) {
+      var k = extractKey(localStorage.getItem(storageKeys[i]));
+      if (k) { keyCache = k; return k; }
+    }
+    var session = extractKey(sessionStorage.getItem("cc-status-key"));
+    if (session) { keyCache = session; return session; }
+    return "";
+  }
+
+  function askForKey() {
+    el("authBox").style.display = "block";
+    el("key").focus();
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return "—";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString();
+  }
+
+  function fmtDuration(seconds) {
+    if (seconds == null) return "—";
+    var s = Math.max(0, Math.floor(seconds));
+    var d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600),
+        m = Math.floor((s % 3600) / 60), sec = s % 60;
+    if (d > 0) return d + " 天 " + h + " 小时";
+    if (h > 0) return h + " 小时 " + m + " 分";
+    if (m > 0) return m + " 分 " + sec + " 秒";
+    return sec + " 秒";
+  }
+
+  function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
+
+  function kv(parent, label, value) {
+    var row = document.createElement("div");
+    row.className = "kv";
+    var a = document.createElement("span"); text(a, label);
+    var b = document.createElement("span"); text(b, value);
+    b.className = "num";
+    row.appendChild(a); row.appendChild(b);
+    parent.appendChild(row);
+  }
+
+  function renderQuota(auth, quota) {
+    var card = document.createElement("div");
+    card.className = "panel";
+
+    var head = document.createElement("div");
+    head.className = "row";
+    var title = document.createElement("strong");
+    text(title, auth.label || auth.auth_id || "credential");
+    head.appendChild(title);
+    var badge = document.createElement("span");
+    badge.className = "badge";
+    var source = quota && quota.groups && quota.groups.length ? "实时" : "本地估算";
+    if (quota && quota.groups && quota.groups.length) badge.className = "badge live";
+    else badge.className = "badge estimated";
+    text(badge, source);
+    head.appendChild(badge);
+    if (auth.disabled) {
+      var dis = document.createElement("span"); dis.className = "badge"; text(dis, "已禁用"); head.appendChild(dis);
+    }
+    card.appendChild(head);
+
+    if (auth.prefix) kv(card, "模型前缀", auth.prefix);
+    kv(card, "近 5 小时请求", auth.requests_5h == null ? "—" : auth.requests_5h);
+
+    if (quota && quota.subscription && quota.subscription.plan) {
+      kv(card, "套餐", quota.subscription.plan);
+    }
+
+    var groups = (quota && quota.groups) || [];
+    groups.forEach(function (group) {
+      var label = document.createElement("div");
+      label.className = "muted";
+      label.style.marginTop = "10px";
+      text(label, group.displayName || "额度窗口");
+      card.appendChild(label);
+      (group.buckets || []).forEach(function (bucket) {
+        var pct = Math.round((bucket.remainingFraction || 0) * 100);
+        var bar = document.createElement("div");
+        bar.className = "bar" + (pct <= 15 ? " bad" : pct <= 40 ? " warn" : "");
+        var fill = document.createElement("i");
+        fill.style.width = pct + "%";
+        bar.appendChild(fill);
+        var row = document.createElement("div");
+        row.className = "row";
+        var left = document.createElement("span");
+        text(left, bucket.window || "");
+        var right = document.createElement("span");
+        right.className = "num muted";
+        var resetText = bucket.resetTime ? ("重置 " + fmtTime(bucket.resetTime)) : "";
+        text(right, pct + "% 剩余" + (resetText ? " · " + resetText : ""));
+        row.appendChild(left); row.appendChild(right);
+        card.appendChild(bar);
+        card.appendChild(row);
+        if (bucket.description) {
+          var d = document.createElement("div");
+          d.className = "muted";
+          text(d, bucket.description);
+          card.appendChild(d);
+        }
+      });
+    });
+
+    if (quota && quota.summary && quota.summary.length) {
+      quota.summary.forEach(function (m) {
+        if (m.format === "text") return;
+        kv(card, m.label || m.key, (m.value == null ? "—" : m.value) + (m.unit ? " " + m.unit : ""));
+      });
+    }
+    if (!groups.length) {
+      var hint = document.createElement("div");
+      hint.className = "muted";
+      hint.style.marginTop = "8px";
+      text(hint, "实时额度需要 CLI 登录 key；可在 auth 文件加 billing_api_key 后重试。");
+      card.appendChild(hint);
+    }
+    return card;
+  }
+
+  function render(data) {
+    el("content").style.display = "block";
+
+    text(el("subtitle"), "v" + (data.plugin && data.plugin.version || "?") +
+      " · 运行 " + fmtDuration(data.plugin && data.plugin.uptime_sec));
+
+    var p = el("pluginInfo"); clear(p);
+    kv(p, "插件 ID", data.plugin && data.plugin.id);
+    kv(p, "版本", data.plugin && data.plugin.version);
+    kv(p, "schema", data.plugin && data.plugin.schema);
+    kv(p, "运行时长", fmtDuration(data.plugin && data.plugin.uptime_sec));
+    kv(p, "CPA 版本", (data.plugin && data.plugin.host_version) || "—");
+
+    var u = el("upstreamInfo"); clear(u);
+    kv(u, "上游", data.upstream && data.upstream.api_base);
+    kv(u, "CLI 版本", data.upstream && data.upstream.cli_version);
+    kv(u, "idle 超时", (data.upstream && data.upstream.idle_timeout_ms) + " ms");
+    kv(u, "重试次数", data.upstream && data.upstream.max_retries);
+
+    var m = el("modelInfo"); clear(m);
+    kv(m, "模型数", data.models && data.models.total);
+    kv(m, "示例", (data.models && data.models.sample || []).slice(0, 3).join(", "));
+
+    var quotaBox = el("quotaBox"); clear(quotaBox);
+    var auths = data.auths || [];
+    if (!auths.length) {
+      var empty = document.createElement("div");
+      empty.className = "panel muted";
+      text(empty, "还没有凭证活动记录。");
+      quotaBox.appendChild(empty);
+    }
+    auths.forEach(function (auth) {
+      quotaBox.appendChild(renderQuota(auth, auth.quota));
+    });
+
+    var totals = data.totals || {};
+    var t = el("totals"); clear(t);
+    kv(t, "总请求", totals.Requests || 0);
+    kv(t, "失败", totals.Failures || 0);
+    var rate = totals.Requests ? ((1 - totals.Failures / totals.Requests) * 100).toFixed(1) : "100.0";
+    kv(t, "成功率", rate + "%");
+
+    var tok = el("tokens"); clear(tok);
+    kv(tok, "输入 tokens", totals.PromptTokens || 0);
+    kv(tok, "输出 tokens", totals.CompletionTokens || 0);
+    kv(tok, "推理 tokens", totals.ReasoningTokens || 0);
+    kv(tok, "缓存 tokens", totals.CachedTokens || 0);
+
+    var recent = el("recent"); clear(recent);
+    (data.recent || []).forEach(function (rec) {
+      var tr = document.createElement("tr");
+      var cells = [
+        fmtTime(rec.at),
+        rec.model || "—",
+        rec.stream ? "是" : "否",
+        rec.status ? String(rec.status) : "OK",
+        (rec.duration_ms || 0) + " ms"
+      ];
+      cells.forEach(function (value) {
+        var td = document.createElement("td");
+        text(td, value);
+        tr.appendChild(td);
+      });
+      var errTd = document.createElement("td");
+      errTd.className = "err muted";
+      text(errTd, rec.error || "");
+      tr.appendChild(errTd);
+      recent.appendChild(tr);
+    });
+    if (!recent.firstChild) {
+      var tr2 = document.createElement("tr");
+      var td2 = document.createElement("td");
+      td2.colSpan = 6; td2.className = "muted";
+      text(td2, "暂无记录");
+      tr2.appendChild(td2);
+      recent.appendChild(tr2);
+    }
+  }
+
+  function load() {
+    var key = managementKey();
+    if (!key) { askForKey(); return; }
+    fetch(API, { headers: { "Authorization": "Bearer " + key }, cache: "no-store" })
+      .then(function (res) {
+        if (res.status === 401 || res.status === 403) {
+          keyCache = null;
+          askForKey();
+          throw new Error("管理密钥无效或已过期");
+        }
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then(function (data) {
+        el("authBox").style.display = "none";
+        render(data);
+      })
+      .catch(function (err) { toast("加载失败：" + err.message); });
+  }
+
+  el("refresh").addEventListener("click", load);
+  el("save").addEventListener("click", function () {
+    var value = el("key").value.trim();
+    if (!value) return;
+    sessionStorage.setItem("cc-status-key", value);
+    keyCache = value;
+    load();
+  });
+  el("reset").addEventListener("click", function () {
+    var key = managementKey();
+    if (!key) { askForKey(); return; }
+    fetch(RESET_API, { method: "POST", headers: { "Authorization": "Bearer " + key } })
+      .then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.json(); })
+      .then(function () { toast("本地统计已清空"); load(); })
+      .catch(function (err) { toast("清空失败：" + err.message); });
+  });
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) {
+      clearInterval(timer); timer = null;
+    } else if (!timer) {
+      timer = setInterval(load, 15000);
+    }
+  });
+
+  load();
+  timer = setInterval(load, 15000);
+})();
+</script>
+</body>
+</html>

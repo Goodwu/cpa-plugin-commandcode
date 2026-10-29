@@ -21,6 +21,11 @@ type keyStorage struct {
 	Label   string `json:"label,omitempty"`
 	BaseURL string `json:"base_url,omitempty"`
 	Prefix  string `json:"prefix,omitempty"`
+	// BillingAPIKey optionally supplies the CLI login key, used only for
+	// read-only billing/quota calls. A provider/API key can run inference but
+	// is rejected (401) by /alpha/billing/*, while the CLI login key from
+	// ~/.commandcode/auth.json can read usage.
+	BillingAPIKey string `json:"billing_api_key,omitempty"`
 }
 
 func parseKeyStorage(raw []byte) (*keyStorage, error) {

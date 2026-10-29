@@ -56,6 +56,7 @@ func handleAuthParse(request []byte) ([]byte, error) {
 	if err != nil {
 		return errorEnvelope("bad_request", err.Error()), nil
 	}
+	pluginState.noteAuth(data.ID, data.Label, data.Prefix, false)
 	return okEnvelope(authParseResponse{Handled: true, Auth: *data})
 }
 
@@ -79,5 +80,6 @@ func handleAuthRefresh(request []byte) ([]byte, error) {
 	if err != nil {
 		return errorEnvelope("refresh_failed", err.Error()), nil
 	}
+	pluginState.noteAuth(data.ID, data.Label, data.Prefix, false)
 	return okEnvelope(authRefreshResponse{Auth: *data, NextRefreshAfter: data.NextRefreshAfter})
 }

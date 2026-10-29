@@ -161,8 +161,17 @@ func handleExecute(request []byte) ([]byte, error) {
 	}
 	cfg := activeConfig()
 	body := toCCRequest(chat, sessionThreadID(req))
-	open, errOpen := openUpstreamStream(req.HostCallbackID, resolveAPIBase(creds.APIBase, cfg.APIBase), creds.APIKey, &body)
+
+	started := time.Now()
+	rec := requestRecord{AuthID: req.AuthID, Model: body.Params.Model, At: started}
+	defer func() {
+		rec.DurationMs = time.Since(started).Milliseconds()
+		pluginState.recordRequest(rec)
+	}()
+
+	open, errOpen := openUpstreamStream(req.HostCallbackID, resolveAPIBase(creds.APIBase, cfg.APIBase), creds.APIKey, req.AuthID, &body)
 	if errOpen != nil {
+		rec.Status, rec.Error = failureRecord(errOpen)
 		return executorFailureEnvelope(errOpen), nil
 	}
 
@@ -178,11 +187,15 @@ func handleExecute(request []byte) ([]byte, error) {
 		applyAggregateEvent(agg, event)
 	}
 	if agg.UpstreamErr != "" {
+		rec.Status = http.StatusBadGateway
+		rec.Error = truncate(sanitizeErrorText(agg.UpstreamErr, creds.APIKey), 200)
 		return httpErrorEnvelope(http.StatusBadGateway, "commandcode-go: "+sanitizeErrorText(agg.UpstreamErr, creds.APIKey)), nil
 	}
 	if pumpErr != nil {
+		rec.Status, rec.Error = failureRecord(pumpErr)
 		return executorFailureEnvelope(pumpErr), nil
 	}
+	recordUsage(&rec, agg.Usage)
 	if agg.Finish == "" {
 		agg.Finish = "stop"
 	}
@@ -224,8 +237,13 @@ func handleExecuteStream(request []byte) ([]byte, error) {
 	}
 	cfg := activeConfig()
 	body := toCCRequest(chat, sessionThreadID(req))
-	open, errOpen := openUpstreamStream(req.HostCallbackID, resolveAPIBase(creds.APIBase, cfg.APIBase), creds.APIKey, &body)
+	started := time.Now()
+	rec := requestRecord{AuthID: req.AuthID, Model: body.Params.Model, Stream: true, At: started}
+	open, errOpen := openUpstreamStream(req.HostCallbackID, resolveAPIBase(creds.APIBase, cfg.APIBase), creds.APIKey, req.AuthID, &body)
 	if errOpen != nil {
+		rec.Status, rec.Error = failureRecord(errOpen)
+		rec.DurationMs = time.Since(started).Milliseconds()
+		pluginState.recordRequest(rec)
 		return executorFailureEnvelope(errOpen), nil
 	}
 
@@ -249,7 +267,7 @@ func handleExecuteStream(request []byte) ([]byte, error) {
 	// before they finish emitting chunks, so keep callbacks alive until the
 	// stream ends"). Open the upstream synchronously so pre-stream failures
 	// still carry HTTP status, then return and pump in the background.
-	go pumpStreamAsync(req.StreamID, open.StreamID, cfg.IdleTimeout, encoder, term)
+	go pumpStreamAsync(req.StreamID, open.StreamID, cfg.IdleTimeout, encoder, term, rec, started)
 
 	return okEnvelope(executorStreamOpenResponse{
 		Headers: map[string][]string{"content-type": {"text/event-stream"}},
@@ -258,8 +276,12 @@ func handleExecuteStream(request []byte) ([]byte, error) {
 
 // pumpStreamAsync drains the upstream NDJSON stream and forwards encoded
 // chunks to the host stream bridge until finish, error, or disconnect.
-func pumpStreamAsync(outputStreamID, upstreamStreamID string, idleTimeout time.Duration, encoder chunkEmitter, term terminator) {
+func pumpStreamAsync(outputStreamID, upstreamStreamID string, idleTimeout time.Duration, encoder chunkEmitter, term terminator, rec requestRecord, started time.Time) {
 	defer hostHTTPStreamClose(upstreamStreamID)
+	defer func() {
+		rec.DurationMs = time.Since(started).Milliseconds()
+		pluginState.recordRequest(rec)
+	}()
 
 	emitChunk := func(chunk []byte) error {
 		return hostStreamEmit(outputStreamID, chunk)
@@ -267,6 +289,9 @@ func pumpStreamAsync(outputStreamID, upstreamStreamID string, idleTimeout time.D
 
 	disconnected := false
 	pumpErr := pumpUpstream(upstreamStreamID, idleTimeout, func(event ccEvent) error {
+		if event.Type == "finish" {
+			recordUsage(&rec, extractUsage(event.Data))
+		}
 		chunks, errEncode := encoder.emit(event)
 		if errEncode != nil {
 			return errEncode
@@ -286,11 +311,14 @@ func pumpStreamAsync(outputStreamID, upstreamStreamID string, idleTimeout time.D
 
 	if disconnected {
 		// The client is gone: nothing left to deliver, just release upstream.
+		rec.Status = 499
+		rec.Error = "client disconnected"
 		hostStreamClose(outputStreamID, "")
 		return
 	}
 
 	if pumpErr != nil {
+		rec.Status, rec.Error = failureRecord(pumpErr)
 		if !encoder.finished() {
 			for _, chunk := range term.failStream(pumpErr.Error()) {
 				_ = hostStreamEmit(outputStreamID, chunk)
@@ -310,6 +338,31 @@ func pumpStreamAsync(outputStreamID, upstreamStreamID string, idleTimeout time.D
 }
 
 var errStreamDisconnected = fmt.Errorf("commandcode-go: client stream closed")
+
+// failureRecord maps an upstream error to the status/message kept for the
+// status page (0 means success and is never produced here).
+func failureRecord(err error) (int, string) {
+	var failure *upstreamFailure
+	if asFailure(err, &failure) {
+		status := failure.Status
+		if status == 0 {
+			status = http.StatusBadGateway
+		}
+		return status, truncate(failure.Message, 200)
+	}
+	return http.StatusBadGateway, truncate(err.Error(), 200)
+}
+
+// recordUsage copies normalized token accounting into a request record.
+func recordUsage(rec *requestRecord, usage *usageData) {
+	if rec == nil || usage == nil {
+		return
+	}
+	rec.PromptTokens = usage.PromptTokens
+	rec.CompletionTokens = usage.CompletionTokens
+	rec.ReasoningTokens = usage.ReasoningTokens
+	rec.CachedTokens = usage.CachedTokens
+}
 
 // executorFailureEnvelope maps an upstream error to the most faithful HTTP
 // status: pass CC's own status through when we have one, otherwise 502.

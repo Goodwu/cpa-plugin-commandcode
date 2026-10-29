@@ -4,10 +4,13 @@
 - （暂无）
 
 ## Next（近期候选，最多 10 条）
-- [ ] （可选）向 CLIProxyAPI-Plugins-Store 提交 registry PR（公开仓库与 v0.1.3 release 已就绪）
+- [ ] 会话亲和的生产端到端验证（同一会话头连发两次请求，确认上游 x-session-id 复用）
   - status: todo
   - context: archives/conversations/cliproxy-commandcode-go-plugin.md
-- [ ] （可选）management 资源页展示插件状态与用量
+- [ ] （可选）安装 agent-browser 后做资源页视觉验证
+  - status: todo
+  - context: archives/conversations/cliproxy-commandcode-go-plugin.md
+- [ ] （可选）向 CLIProxyAPI-Plugins-Store 提交 registry PR（v0.2.0 已发布）
   - status: todo
   - context: archives/conversations/cliproxy-commandcode-go-plugin.md
 
@@ -15,6 +18,8 @@
 - （暂无）
 
 ## Recently Done（最近完成，最多 5-10 条）
+- [x] v0.2.0：管理资源页 + 额度能力（`management_api` + `quota_provider`）。额度经 CLI billing 端点取实时 5h/周窗口，429 与本地计数兜底；生产验证 `supports_quota: true`、额度与页面均正常
+- [x] 逆向 command-code CLI（v1.88.2）定位额度渠道：`/alpha/billing/credits`、`/alpha/billing/subscriptions`、`/alpha/usage/summary`、`/alpha/whoami`；确认 billing 端点只认 CLI 登录 key
 - [x] 发布 v0.1.3：public 仓库 Goodwu/cpa-plugin-commandcode，tag 触发 release，四平台 zip + checksums 产物齐全，CI/Release 全绿
 - [x] 会话亲和（v0.1.2）：客户端会话头（X-Session-Id / X-Claude-Code-Session-Id / Conversation-Id 等）复用为上游 x-session-id，非法值回退 UUID；单测覆盖
 - [x] 生产清理与补验：model-router 加 `data_path` 后恢复注册（5 插件全绿）、移除 example 配置残留、Codex/Responses 流式面验证通过、darwin 打包格式验证通过

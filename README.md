@@ -62,6 +62,35 @@ JSON
 
 重启 CPA 即生效。支持多文件多 key（宿主负责轮转与失败切换）；每个 auth 文件可用 `"base_url"` 字段单独覆盖上游地址。无交互式登录：`auth.login.*` 明确返回不支持。
 
+## 状态页与额度
+
+插件声明 `management_api` + `quota_provider`（CPA v8），额度可直接显示在 CPA 管理中心的凭证卡片，同时提供独立状态页：
+
+```
+http://localhost:8317/v0/resource/plugins/commandcode-go/status
+```
+
+页面展示：凭证列表、5 小时/周额度窗口（剩余比例 + 重置时间）、请求与 token 统计、最近请求与错误。数据接口需要管理密钥（页面会复用管理中心已保存的密钥，否则提示手动输入）：
+
+```
+GET  /v0/management/plugins/commandcode-go/status       # JSON 快照
+POST /v0/management/plugins/commandcode-go/reset-stats  # 清空本地统计
+```
+
+### 额度数据从哪来
+
+CommandCode 的额度只对 **CLI 登录 key** 开放（`/alpha/billing/credits`、`/alpha/billing/subscriptions`），而 Provider/API key 调用这些端点会返回 401（但可以正常推理）。因此：
+
+- 实时额度：在 auth 文件里补一个只读用的 `billing_api_key`（从 `~/.commandcode/auth.json` 的 `apiKey` 复制）：
+
+```json
+{"type":"commandcode-go","api_key":"<推理用的 key>","billing_api_key":"<CLI 登录 key>","label":"main","prefix":"cc"}
+```
+
+- 未配置或请求失败时自动回退：先使用最近一次 429 响应里的 `rateLimit{limit,remaining,reset,window}` 校准值，再退到「本地 5 小时滚动请求计数」，页面会标注数据来源。
+
+额度请求全程只读 GET，不消耗生成额度；结果缓存 60 秒，套餐信息缓存 5 分钟。
+
 ## 使用
 
 模型 ID 以 `GET /v1/models` 为准（完整 ID，如 `deepseek/deepseek-v4-pro`）。别名（`deepseek-v4-pro`、`glm5.2` 等）由插件内部解析，但**客户端必须请求 CPA 已注册的完整 ID**，否则宿主机由不会把它路由到本插件。
@@ -91,6 +120,8 @@ Claude Code / Codex / 任意 OpenAI 兼容客户端按 CPA 常规方式接即可
 
 真实订阅 key 端到端验收已通过（2026-10-28，CPA 源码 v7.2.141 沙箱实例，以及生产 brew v8.0.40 实例）：OpenAI Chat Completions、Claude Messages、Codex Responses 三个 surface 的流式与非流式、thinking 块、工具调用流、usage 明细、断连清理均正常。
 
+额度与状态页（2026-10-29，生产 v8.0.40）：`quota_provider` 生效（`supports_quota: true`），`/v8/management/plugins/commandcode-go/quota` 返回实时 5 小时/周窗口（剩余比例、重置时间、套餐、剩余 credits）；资源页与 JSON 接口可访问；未配置 `billing_api_key` 时正确回退本地统计。
+
 ## 开发
 
 ```
@@ -108,6 +139,10 @@ translate_request.go   chat-completions → CC 请求体
 translate_stream.go    CC 事件 → chat.completion.chunk / 非流式聚合
 translate_claude.go    CC 事件 → Anthropic 原生 SSE / 非流式 message（Claude 面）
 executor.go        executor.execute / execute_stream / count_tokens
+state.go           进程内状态：请求记录、滚动窗口计数、429 校准
+quota.go           quota.* RPC：CLI billing 端点/429/本地计数三层额度
+management.go      management.* RPC：资源页与 JSON 数据接口
+web/status.html    状态页（单文件，内联样式/脚本，go:embed）
 version.go         npm CLI 版本刷新
 ```
 
