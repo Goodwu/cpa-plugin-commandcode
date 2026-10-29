@@ -18,6 +18,10 @@
 - （暂无）
 
 ## Recently Done（最近完成，最多 5-10 条）
+- [x] 部署 0.2.2 并验收：生产五插件正常、实时额度、非流式正文、Claude 双工具流；隔离 v8.0.40 宿主验证会话亲和、错误脱敏/失败统计、长流卸载及重新加载推理；已有版本和配置可回滚
+  - context: archives/conversations/cliproxy-commandcode-go-plugin.md
+- [x] critical review 修复：Claude 工具流/首帧、错误脱敏与失败统计、shutdown 生命周期、工具禁用、DONE、版本刷新、assistant 历史及额度窗口；补回归测试，race/vet/本机动态库构建通过；critical reviewer 独立复审通过（并发额度及生命周期重点测试 race 连跑 10 次）
+  - context: archives/conversations/cliproxy-commandcode-go-plugin.md
 - [x] 管理中心配额页显示 CommandCode 实时 5 小时及每周额度，真实浏览器验证窗口及重置时间；原页面已备份
 - [x] v0.2.1：凭证改为单 key 二选一（CLI 登录 key 兼顾推理+额度；settings 的 API key 仅推理）。实测两种 key 均可推理，生产已切换为 CLI 登录 key 并验证额度与推理
 - [x] v0.2.0：管理资源页 + 额度能力（`management_api` + `quota_provider`）。额度经 CLI billing 端点取实时 5h/周窗口，429 与本地计数兜底；生产验证 `supports_quota: true`、额度与页面均正常

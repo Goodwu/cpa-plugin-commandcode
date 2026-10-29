@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -188,16 +189,26 @@ func handleQuotaFetch(request []byte) ([]byte, error) {
 	}
 	apiBase := resolveAPIBase(baseURLOverride, activeConfig().APIBase)
 	authID := firstNonEmpty(req.AuthID, req.AuthIndex, "default")
+	cacheID := fmt.Sprintf("%s:%x", authID, sha256.Sum256([]byte(apiBase+"\x00"+apiKey)))
 
-	if cached, ok := lookupQuotaCache(authID); ok {
+	bindQuotaIdentity(authID, cacheID)
+	if cached, ok := lookupQuotaCache(cacheID); ok {
 		return okEnvelope(cached)
 	}
 
 	resp, errFetch := fetchQuotaFromBilling(req.HostCallbackID, apiBase, apiKey, authID)
 	if errFetch != nil {
-		resp = localQuotaFallback(authID, errFetch)
+		// Identity validation and snapshot read share the bind lock, so an
+		// old request cannot copy the newly selected account's calibration.
+		quotaCache.mu.Lock()
+		fallbackID := authID
+		if quotaIdentities[authID] != cacheID {
+			fallbackID = ""
+		}
+		resp = localQuotaFallback(fallbackID, fmt.Errorf("%s", sanitizeErrorText(errFetch.Error(), apiKey)))
+		quotaCache.mu.Unlock()
 	}
-	storeQuotaCache(authID, resp)
+	storeQuotaCache(cacheID, resp)
 	return okEnvelope(resp)
 }
 
@@ -269,7 +280,12 @@ func fetchQuotaFromBilling(callbackID, apiBase, apiKey, authID string) (quotaFet
 		resp.Subscription = &quotaSubscription{Plan: planID, TierID: planID}
 		_ = period
 	}
-	rememberLocalQuota(authID, credits)
+	quotaCache.mu.Lock()
+	identity := fmt.Sprintf("%s:%x", authID, sha256.Sum256([]byte(apiBase+"\x00"+apiKey)))
+	if current := quotaIdentities[authID]; current == "" || current == identity {
+		rememberLocalQuota(authID, credits)
+	}
+	quotaCache.mu.Unlock()
 	return resp, nil
 }
 
@@ -293,6 +309,7 @@ func getCredits(callbackID, apiBase, apiKey, cliVersion string) (*ccCreditsRespo
 }
 
 func getPlan(callbackID, apiBase, apiKey, cliVersion, authID string) (string, string) {
+	authID = fmt.Sprintf("%s:%x", authID, sha256.Sum256([]byte(apiBase+"\x00"+apiKey)))
 	planCache.mu.Lock()
 	if entry, ok := planCache.items[authID]; ok && time.Since(entry.at) < planCacheTTL {
 		planCache.mu.Unlock()
@@ -370,7 +387,7 @@ func recordRateLimitFromBody(authID, body string) {
 	case rate.Reset > 0: // seconds
 		resetAt = time.Unix(rate.Reset, 0)
 	}
-	pluginState.recordRateLimit(authID, rate.Window, rate.Limit, rate.Remaining, resetAt)
+	pluginState.recordRateLimit(authID, rate.Window, float64(rate.Limit), float64(rate.Remaining), resetAt)
 }
 
 // rememberLocalQuota keeps the freshest window limits for the local fallback.
@@ -378,12 +395,15 @@ func rememberLocalQuota(authID string, credits *ccCreditsResponse) {
 	if credits == nil || credits.WindowLimits == nil {
 		return
 	}
-	if w := credits.WindowLimits.FiveHour; w != nil && w.Cap > 0 {
-		remaining := int(w.Cap - w.Used)
+	for window, w := range map[string]*ccWindowLimit{"5h": credits.WindowLimits.FiveHour, "7d": credits.WindowLimits.Weekly} {
+		if w == nil || w.Cap <= 0 {
+			continue
+		}
+		remaining := w.Cap - w.Used
 		if remaining < 0 {
 			remaining = 0
 		}
-		pluginState.recordRateLimit(authID, "fiveHour", int(w.Cap), remaining, time.UnixMilli(w.ResetAt))
+		pluginState.recordRateLimit(authID, window, w.Cap, remaining, time.UnixMilli(w.ResetAt))
 	}
 }
 
@@ -412,23 +432,25 @@ func localQuotaFallback(authID string, cause error) quotaFetchResponse {
 		resp.Summary = append(resp.Summary, quotaMetric{
 			Key: "local_requests_5h", Label: "Requests in last 5h", Value: float64(auth.Requests5h), Unit: "requests", Format: "number",
 		})
-		if rl := auth.RateLimit; rl != nil && rl.Limit > 0 {
-			fraction := float64(rl.Remaining) / float64(rl.Limit)
-			if fraction < 0 {
-				fraction = 0
+		for _, rl := range auth.RateLimits {
+			if rl != nil && rl.Limit > 0 && rl.ResetAt.After(time.Now()) {
+				fraction := float64(rl.Remaining) / float64(rl.Limit)
+				if fraction < 0 {
+					fraction = 0
+				}
+				if fraction > 1 {
+					fraction = 1
+				}
+				bucket := quotaBucket{
+					Window:            rl.Window,
+					RemainingFraction: fraction,
+					Description:       fmt.Sprintf("Calibration: %g / %g remaining", rl.Remaining, rl.Limit),
+				}
+				if !rl.ResetAt.IsZero() {
+					bucket.ResetTime = rl.ResetAt.UTC().Format(time.RFC3339)
+				}
+				resp.Groups = append(resp.Groups, quotaGroup{DisplayName: "Usage limits (estimated)", Buckets: []quotaBucket{bucket}})
 			}
-			if fraction > 1 {
-				fraction = 1
-			}
-			bucket := quotaBucket{
-				Window:            "5h",
-				RemainingFraction: fraction,
-				Description:       fmt.Sprintf("429 calibration: %d / %d remaining", rl.Remaining, rl.Limit),
-			}
-			if !rl.ResetAt.IsZero() {
-				bucket.ResetTime = rl.ResetAt.UTC().Format(time.RFC3339)
-			}
-			resp.Groups = []quotaGroup{{DisplayName: "Usage limits (estimated)", Buckets: []quotaBucket{bucket}}}
 		}
 	}
 	if cause != nil {
@@ -446,6 +468,9 @@ func localQuotaFallback(authID string, cause error) quotaFetchResponse {
 func lookupQuotaCache(authID string) (quotaFetchResponse, bool) {
 	quotaCache.mu.Lock()
 	defer quotaCache.mu.Unlock()
+	if key := quotaIdentities[authID]; key != "" {
+		authID = key
+	}
 	entry, ok := quotaCache.items[authID]
 	if !ok || time.Since(entry.at) >= quotaCacheTTL {
 		return quotaFetchResponse{}, false
@@ -473,4 +498,22 @@ func round2(value float64) float64 {
 		return parsed
 	}
 	return value
+}
+
+// Aliases let the management snapshot resolve the current credential cache.
+var quotaIdentities = map[string]string{}
+
+func bindQuotaIdentity(authID, identity string) {
+	quotaCache.mu.Lock()
+	old := quotaIdentities[authID]
+	quotaIdentities[authID] = identity
+	quotaCache.mu.Unlock()
+	if old != "" && old != identity {
+		pluginState.mu.Lock()
+		if entry := pluginState.auths[authID]; entry != nil {
+			entry.RateLimit = nil
+			entry.RateLimits = nil
+		}
+		pluginState.mu.Unlock()
+	}
 }

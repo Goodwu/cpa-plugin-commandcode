@@ -24,7 +24,7 @@ jobs:
         run: go vet ./...
 
       - name: Run tests
-        run: go test ./...
+        run: go test -race ./...
 
   package:
     strategy:
@@ -50,7 +50,7 @@ jobs:
           cache: true
 
       - name: Run platform tests
-        run: go test ./...
+        run: go test -race ./...
 
       - name: Build and package production plugin
         run: make package-${{ matrix.platform }} VERSION=0.0.0

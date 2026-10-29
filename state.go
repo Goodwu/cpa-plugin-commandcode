@@ -31,8 +31,8 @@ type requestRecord struct {
 
 // rateLimitSnapshot is what the upstream reported on a 429 today.
 type rateLimitSnapshot struct {
-	Limit     int       `json:"limit"`
-	Remaining int       `json:"remaining"`
+	Limit     float64   `json:"limit"`
+	Remaining float64   `json:"remaining"`
 	ResetAt   time.Time `json:"reset_at"`
 	Window    string    `json:"window"`
 	SeenAt    time.Time `json:"seen_at"`
@@ -48,6 +48,7 @@ type authStats struct {
 	LastRequestAt time.Time
 	Requests      []time.Time
 	RateLimit     *rateLimitSnapshot
+	RateLimits    map[string]*rateLimitSnapshot
 }
 
 type stateTotals struct {
@@ -136,12 +137,18 @@ func (s *stateStore) recordRequest(rec requestRecord) {
 }
 
 // recordRateLimit stores the 429 calibration for one credential.
-func (s *stateStore) recordRateLimit(authID, window string, limit, remaining int, resetAt time.Time) {
+func (s *stateStore) recordRateLimit(authID, window string, limit, remaining float64, resetAt time.Time) {
 	if authID == "" {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	switch window {
+	case "fiveHour":
+		window = "5h"
+	case "weekly":
+		window = "7d"
+	}
 	entry := s.authEntryLocked(authID)
 	entry.RateLimit = &rateLimitSnapshot{
 		Limit:     limit,
@@ -150,6 +157,10 @@ func (s *stateStore) recordRateLimit(authID, window string, limit, remaining int
 		Window:    window,
 		SeenAt:    time.Now(),
 	}
+	if entry.RateLimits == nil {
+		entry.RateLimits = map[string]*rateLimitSnapshot{}
+	}
+	entry.RateLimits[window] = entry.RateLimit
 }
 
 // requestsSince counts locally observed requests inside the rolling window.
@@ -166,13 +177,14 @@ func (entry *authStats) requestsSince(since time.Time) int {
 
 // authSnapshot is the read-only projection used by JSON rendering.
 type authSnapshot struct {
-	AuthID        string             `json:"auth_id"`
-	Label         string             `json:"label,omitempty"`
-	Prefix        string             `json:"prefix,omitempty"`
-	Disabled      bool               `json:"disabled"`
-	LastRequestAt string             `json:"last_request_at,omitempty"`
-	Requests5h    int                `json:"requests_5h"`
-	RateLimit     *rateLimitSnapshot `json:"rate_limit,omitempty"`
+	AuthID        string                        `json:"auth_id"`
+	Label         string                        `json:"label,omitempty"`
+	Prefix        string                        `json:"prefix,omitempty"`
+	Disabled      bool                          `json:"disabled"`
+	LastRequestAt string                        `json:"last_request_at,omitempty"`
+	Requests5h    int                           `json:"requests_5h"`
+	RateLimits    map[string]*rateLimitSnapshot `json:"rate_limits,omitempty"`
+	RateLimit     *rateLimitSnapshot            `json:"rate_limit,omitempty"`
 }
 
 // stateSnapshot is the status payload served to the management page.
@@ -208,6 +220,10 @@ func (s *stateStore) snapshot() stateSnapshot {
 			Disabled:   entry.Disabled,
 			Requests5h: entry.requestsSince(since),
 			RateLimit:  entry.RateLimit,
+			RateLimits: map[string]*rateLimitSnapshot{},
+		}
+		for k, v := range entry.RateLimits {
+			snap.RateLimits[k] = v
 		}
 		if !entry.LastRequestAt.IsZero() {
 			snap.LastRequestAt = entry.LastRequestAt.UTC().Format(time.RFC3339)

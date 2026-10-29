@@ -175,23 +175,20 @@ func handleExecute(request []byte) ([]byte, error) {
 		return executorFailureEnvelope(errOpen), nil
 	}
 
-	var collected []ccEvent
+	agg := &aggregateResult{callIndex: map[string]int{}}
 	pumpErr := pumpUpstream(open.StreamID, cfg.IdleTimeout, func(event ccEvent) error {
-		collected = append(collected, event)
+		applyAggregateEvent(agg, event)
 		return nil
 	})
 	hostHTTPStreamClose(open.StreamID)
 
-	agg := &aggregateResult{callIndex: map[string]int{}}
-	for _, event := range collected {
-		applyAggregateEvent(agg, event)
-	}
 	if agg.UpstreamErr != "" {
 		rec.Status = http.StatusBadGateway
 		rec.Error = truncate(sanitizeErrorText(agg.UpstreamErr, creds.APIKey), 200)
 		return httpErrorEnvelope(http.StatusBadGateway, "commandcode-go: "+sanitizeErrorText(agg.UpstreamErr, creds.APIKey)), nil
 	}
 	if pumpErr != nil {
+		pumpErr = fmt.Errorf("%s", sanitizeErrorText(pumpErr.Error(), creds.APIKey))
 		rec.Status, rec.Error = failureRecord(pumpErr)
 		return executorFailureEnvelope(pumpErr), nil
 	}
@@ -216,9 +213,8 @@ func handleExecute(request []byte) ([]byte, error) {
 	})
 }
 
-// handleExecuteStream streams one generation. The RPC stays open while the
-// pump pushes chat.completion.chunk payloads through host.stream.emit; the
-// host translates them toward the client protocol.
+// handleExecuteStream opens upstream synchronously, then returns the RPC
+// before the background pump emits chunks through the host stream bridge.
 func handleExecuteStream(request []byte) ([]byte, error) {
 	var req executorRequest
 	if err := decodeRequest(request, &req); err != nil {
@@ -267,7 +263,14 @@ func handleExecuteStream(request []byte) ([]byte, error) {
 	// before they finish emitting chunks, so keep callbacks alive until the
 	// stream ends"). Open the upstream synchronously so pre-stream failures
 	// still carry HTTP status, then return and pump in the background.
-	go pumpStreamAsync(req.StreamID, open.StreamID, cfg.IdleTimeout, encoder, term, rec, started)
+	if !registerStream(open.StreamID, req.StreamID) {
+		hostHTTPStreamClose(open.StreamID)
+		return errorEnvelope("shutting_down", "plugin shutting down"), nil
+	}
+	go func() {
+		defer releaseStream(open.StreamID)
+		pumpStreamAsync(req.StreamID, open.StreamID, cfg.IdleTimeout, encoder, term, rec, started, creds.APIKey)
+	}()
 
 	return okEnvelope(executorStreamOpenResponse{
 		Headers: map[string][]string{"content-type": {"text/event-stream"}},
@@ -276,7 +279,7 @@ func handleExecuteStream(request []byte) ([]byte, error) {
 
 // pumpStreamAsync drains the upstream NDJSON stream and forwards encoded
 // chunks to the host stream bridge until finish, error, or disconnect.
-func pumpStreamAsync(outputStreamID, upstreamStreamID string, idleTimeout time.Duration, encoder chunkEmitter, term terminator, rec requestRecord, started time.Time) {
+func pumpStreamAsync(outputStreamID, upstreamStreamID string, idleTimeout time.Duration, encoder chunkEmitter, term terminator, rec requestRecord, started time.Time, apiKey string) {
 	defer hostHTTPStreamClose(upstreamStreamID)
 	defer func() {
 		rec.DurationMs = time.Since(started).Milliseconds()
@@ -289,6 +292,9 @@ func pumpStreamAsync(outputStreamID, upstreamStreamID string, idleTimeout time.D
 
 	disconnected := false
 	pumpErr := pumpUpstream(upstreamStreamID, idleTimeout, func(event ccEvent) error {
+		if event.Type == "error" {
+			return fmt.Errorf("upstream: %s", sanitizeErrorText(eventErrorMessage(event), apiKey))
+		}
 		if event.Type == "finish" {
 			recordUsage(&rec, extractUsage(event.Data))
 		}
@@ -318,13 +324,14 @@ func pumpStreamAsync(outputStreamID, upstreamStreamID string, idleTimeout time.D
 	}
 
 	if pumpErr != nil {
+		pumpErr = fmt.Errorf("%s", sanitizeErrorText(pumpErr.Error(), apiKey))
 		rec.Status, rec.Error = failureRecord(pumpErr)
 		if !encoder.finished() {
 			for _, chunk := range term.failStream(pumpErr.Error()) {
 				_ = hostStreamEmit(outputStreamID, chunk)
 			}
 		}
-		hostStreamClose(outputStreamID, "")
+		hostStreamClose(outputStreamID, pumpErr.Error())
 		return
 	}
 	if !encoder.finished() {

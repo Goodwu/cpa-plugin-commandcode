@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -29,40 +31,54 @@ func currentCLIVersion(callbackID string) string {
 	}
 	versionMu.Lock()
 	defer versionMu.Unlock()
-	if cachedVersion != "" && time.Since(versionFetchedAt) < cliVersionRefreshInterval {
-		return cachedVersion
+	result := cachedVersion
+	if result == "" {
+		result = defaultFallbackCLIVersion
 	}
-	version, errFetch := fetchLatestCLIVersion(callbackID)
-	if errFetch == nil && version != "" {
-		cachedVersion = version
+	if time.Since(versionFetchedAt) >= cliVersionRefreshInterval {
 		versionFetchedAt = time.Now()
-		return cachedVersion
+		pluginRuntime.Lock()
+		if !pluginRuntime.closing {
+			pluginRuntime.wg.Add(1)
+			go func() {
+				defer pluginRuntime.wg.Done()
+				version, err := lookupCLIVersion("")
+				versionMu.Lock()
+				defer versionMu.Unlock()
+				if err == nil && version != "" {
+					cachedVersion = version
+					versionFetchedAt = time.Now()
+				} else {
+					versionFetchedAt = time.Now().Add(-cliVersionRefreshInterval + 5*time.Minute)
+				}
+			}()
+		}
+		pluginRuntime.Unlock()
 	}
-	if cachedVersion != "" {
-		return cachedVersion
-	}
-	// Failed lookups still get a full interval of patience: the fallback
-	// constant beats re-fetching on every request while the registry is down.
-	versionFetchedAt = time.Now()
-	return defaultFallbackCLIVersion
+	return result
 }
 
+var lookupCLIVersion = fetchLatestCLIVersion
+
 func fetchLatestCLIVersion(callbackID string) (string, error) {
-	response, errCall := hostHTTPDo(callbackID, hostHTTPRequestMsg{
-		Method:  "GET",
-		URL:     npmLatestURL,
-		Headers: map[string][]string{"Accept": {"application/json"}},
-	})
-	if errCall != nil {
-		return "", errCall
+	// Version discovery is public metadata and has an independent deadline;
+	// it must not inherit a generation callback that may already have ended.
+	response, err := (&http.Client{Timeout: 5 * time.Second}).Get(npmLatestURL)
+	if err != nil {
+		return "", err
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
 		return "", newStatusError(response.StatusCode, "npm registry lookup failed")
+	}
+	raw, err := io.ReadAll(io.LimitReader(response.Body, 64*1024))
+	if err != nil {
+		return "", err
 	}
 	var payload struct {
 		Version string `json:"version"`
 	}
-	if errUnmarshal := json.Unmarshal(response.Body, &payload); errUnmarshal != nil {
+	if errUnmarshal := json.Unmarshal(raw, &payload); errUnmarshal != nil {
 		return "", errUnmarshal
 	}
 	if strings.TrimSpace(payload.Version) == "" {

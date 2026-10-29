@@ -112,13 +112,15 @@ Claude Code / Codex / 任意 OpenAI 兼容客户端按 CPA 常规方式接即可
 - **异步流泵**：`executor.execute_stream` 打开上游（同步，保留流前错误的 HTTP 状态语义）后立即返回，chunk 在后台 goroutine 经 `host.stream.emit` 推送——宿主 stream bridge 队列仅 16，在 RPC 内同步泵会在长流上死锁。
 - **推理链**：`reasoning-delta` → OpenAI `reasoning_content` / Anthropic thinking block。
 - **会话亲和**：客户端带回话头（`X-Session-Id`、`X-Claude-Code-Session-Id`、`Conversation-Id` 等）时复用作上游 `x-session-id`，同一会话跨轮次保持连续并利于上游缓存；缺失或非法时回退新 UUID。
-- **并行工具调用**：按 `toolCallId` 分配稳定流式 index，`tool-call` 终态与增量做一致性合并（含 id/name 未知的缓冲兜底）。
-- **reliability**：5xx/429/传输错误仅在流开始前重试（线性退避）；块间 idle 超时合成 finish；上游 error 事件以合法流形态送达客户端；错误信息脱敏 API key；客户端断连立即关闭上游流、停止烧额度。
+- **并行工具调用**：按 `toolCallId` 合并参数；OpenAI 保持稳定流式 index，Claude 缓冲工具参数并在结束时按完整内容块依次输出。
+- **reliability**：5xx/429/传输错误仅在流开始前重试（线性退避）；块间 idle 超时与上游 error 事件返回可识别的流错误，并计入失败统计；错误信息脱敏 API key；客户端断连立即关闭上游流、停止烧额度。
 - **凭证安全**：key 只从执行请求的 `StorageJSON` 即用即弃，不复制进宿主属性；日志不输出 key 或原始凭证。
-- **CLI 指纹**：`User-Agent: commandcode-cli/<ver>`、`x-command-code-version` 等头缺一不可（上游会拒绝疑似代理流量），版本号自动从 npm 刷新。
+- **CLI 指纹**：`User-Agent: commandcode-cli/<ver>`、`x-command-code-version` 等头缺一不可（上游会拒绝疑似代理流量），版本号后台从 npm 刷新（独立 5 秒超时；使用系统 HTTP 代理设置），请求立即使用缓存或默认版本。该元数据查询不继承 CPA 自定义代理；仅使用 CPA 代理的环境应配置 `cli_version` 或系统代理。
 - 与参考实现一致，本插件默认面向**本机/受信网络**部署；`/alpha/generate` 不是公开 API，请自行评估暴露风险。
 
 ## 验证状态
+
+0.2.2（2026-10-29）：生产 CPA v8.0.40 已加载并验证实时额度、OpenAI 非流式正文与 usage、Claude 流式双工具参数。隔离的同版本宿主配合模拟上游验证会话亲和、无 start 首帧、A/B/A 工具交错、错误脱敏及失败统计、长流中卸载和重新加载后推理；这些故障测试不代表真实上游故障已复现。
 
 真实订阅 key 端到端验收已通过（2026-10-28，CPA 源码 v7.2.141 沙箱实例，以及生产 brew v8.0.40 实例）：OpenAI Chat Completions、Claude Messages、Codex Responses 三个 surface 的流式与非流式、thinking 块、工具调用流、usage 明细、断连清理均正常。
 

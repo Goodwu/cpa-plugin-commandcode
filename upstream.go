@@ -104,7 +104,7 @@ func openUpstreamStream(callbackID, apiBase, apiKey, authID string, body *ccRequ
 		open, errCall := hostHTTPDoStream(callbackID, request)
 		if errCall != nil {
 			lastErr = &upstreamFailure{
-				Message:   fmt.Sprintf("CC upstream request failed: %v", errCall),
+				Message:   "CC upstream request failed: " + sanitizeErrorText(errCall.Error(), apiKey),
 				Retryable: true,
 			}
 			if attempt < cfg.MaxRetries {
@@ -173,9 +173,14 @@ func drainErrorBody(streamID, apiKey string) string {
 // The caller MUST close the stream via hostHTTPStreamClose on every exit path;
 // that also cancels the host-side read and wakes the puller goroutine.
 func pumpUpstream(streamID string, idleTimeout time.Duration, handle func(ccEvent) error) error {
+	pullerDone := make(chan struct{})
+	defer func() { hostHTTPStreamClose(streamID); <-pullerDone }()
+	stop := make(chan struct{})
+	defer close(stop)
 	events := make(chan ccEvent)
 	errs := make(chan error, 1)
 	go func() {
+		defer close(pullerDone)
 		defer close(events)
 		buffer := ""
 		for {
@@ -199,7 +204,7 @@ func pumpUpstream(streamID string, idleTimeout time.Duration, handle func(ccEven
 					emit := event
 					select {
 					case events <- emit:
-					case <-errs:
+					case <-stop:
 						return
 					}
 				}
@@ -209,7 +214,7 @@ func pumpUpstream(streamID string, idleTimeout time.Duration, handle func(ccEven
 					if event, ok := parseCCLine(buffer); ok {
 						select {
 						case events <- event:
-						case <-errs:
+						case <-stop:
 						}
 					}
 				}
@@ -245,9 +250,15 @@ func pumpUpstream(streamID string, idleTimeout time.Duration, handle func(ccEven
 						return nil
 					}
 				}
+				if event.Type == "done" {
+					return nil
+				}
 				lastActivity = time.Now()
 				if err := handle(event); err != nil {
 					return err
+				}
+				if event.Type == "finish" || event.Type == "error" {
+					return nil
 				}
 			case err := <-errs:
 				return err
@@ -257,14 +268,6 @@ func pumpUpstream(streamID string, idleTimeout time.Duration, handle func(ccEven
 		}
 	}()
 
-	if pumpErr != nil {
-		// Wake the puller if it is parked on an events send: the buffered
-		// error makes its `case <-errs` branches fire and it exits.
-		select {
-		case errs <- pumpErr:
-		default:
-		}
-	}
 	return pumpErr
 }
 

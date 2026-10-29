@@ -77,7 +77,7 @@ PLUGINS_DIR ?=
 
 build: vet test $(OUT)
 
-$(OUT): $(wildcard *.go *.h *.c catalog.json go.mod)
+$(OUT): $(wildcard *.go *.h *.c catalog.json go.mod web/status.html)
 	@mkdir -p $(BIN_DIR)
 	go build $(BUILD_FLAGS) -o $(abspath $(OUT)) .
 	rm -f $(BIN_DIR)/$(PLUGIN_ID)-v$(VERSION).h

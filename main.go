@@ -18,6 +18,7 @@ func cliproxy_plugin_init(host *C.cliproxy_host_api, plugin *C.cliproxy_plugin_a
 	if plugin == nil {
 		return 1
 	}
+	initializeRuntime()
 	C.store_host_api(host)
 	plugin.abi_version = C.uint32_t(abiVersion)
 	plugin.call = C.cliproxy_plugin_call_fn(C.cliproxyPluginCall)
@@ -54,7 +55,7 @@ func cliproxyPluginFree(ptr unsafe.Pointer, len C.size_t) {
 }
 
 //export cliproxyPluginShutdown
-func cliproxyPluginShutdown() {}
+func cliproxyPluginShutdown() { shutdownRuntime(); C.store_host_api(nil) }
 
 func cBytes(request *C.uint8_t, requestLen C.size_t) []byte {
 	if request == nil || requestLen == 0 {

@@ -207,18 +207,8 @@ func TestClaudeToolBufferedBeforeIdKnown(t *testing.T) {
 func TestClaudeErrorEventProducesLegalStream(t *testing.T) {
 	enc := newClaudeEncoder("m")
 	all := claudeEmit(t, enc, "error", `{"message":"quota"}`)
-	types := strings.Join(frameTypes(all), ",")
-	if !strings.HasPrefix(types, "message_start") || !strings.HasSuffix(types, "message_stop") {
-		t.Fatalf("error stream shape = %s", types)
-	}
-	text := ""
-	for _, f := range all {
-		if f.Event == "content_block_delta" {
-			text += f.Data["delta"].(map[string]any)["text"].(string)
-		}
-	}
-	if !strings.Contains(text, "[upstream error] quota") {
-		t.Fatalf("error text = %q", text)
+	if len(all) != 1 || all[0].Event != "error" || !enc.finished() {
+		t.Fatalf("error stream: %v", all)
 	}
 }
 

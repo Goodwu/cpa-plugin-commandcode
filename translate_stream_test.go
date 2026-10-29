@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 )
 
@@ -122,12 +121,8 @@ func TestStreamEncoderFinishUsageAndError(t *testing.T) {
 	}
 
 	errChunks := enc.errorChunks("boom")
-	if len(errChunks) != 2 {
-		t.Fatalf("error pair expected")
-	}
-	content := firstDelta(t, decodeChunk(t, errChunks[0]))["content"].(string)
-	if !strings.Contains(content, "[upstream error] boom") {
-		t.Fatalf("error content = %q", content)
+	if len(errChunks) != 1 || decodeChunk(t, errChunks[0])["error"] == nil {
+		t.Fatal("expected explicit error")
 	}
 }
 

@@ -46,7 +46,7 @@ func TestRecordRateLimitFromBody(t *testing.T) {
 			rate = snapshot.Auths[i].RateLimit
 		}
 	}
-	if rate == nil || rate.Limit != 3 || rate.Remaining != 0 || rate.Window != "fiveHour" {
+	if rate == nil || rate.Limit != 3 || rate.Remaining != 0 || rate.Window != "5h" {
 		t.Fatalf("rate limit = %+v", rate)
 	}
 	if rate.ResetAt.Unix() != 1793178541 {
@@ -82,7 +82,7 @@ func TestQuotaFetchFallsBackToLocalState(t *testing.T) {
 
 	// Local observation: one request plus a 429 calibration.
 	pluginState.recordRequest(requestRecord{AuthID: "a.json", Model: "m", At: time.Now()})
-	recordRateLimitFromBody("a.json", `{"error":{"rateLimit":{"limit":3,"remaining":1,"reset":1793178541,"window":"fiveHour"}}}`)
+	pluginState.recordRateLimit("a.json", "5h", 3, 1, time.Now().Add(time.Hour))
 
 	payload := map[string]any{
 		"auth_id":      "a.json",

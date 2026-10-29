@@ -161,7 +161,13 @@ func toCCRequest(req *chatRequest, threadID string) ccRequestBody {
 		},
 		ThreadID: threadID,
 	}
-	applyNoToolsSafeguard(&body, len(req.Tools) > 0)
+	var toolMode string
+	_ = json.Unmarshal(req.ToolChoice, &toolMode)
+	if toolMode == "none" {
+		body.Params.Tools = nil
+		body.Params.ToolChoice = nil
+	}
+	applyNoToolsSafeguard(&body, len(body.Params.Tools) > 0)
 	return body
 }
 
@@ -226,6 +232,15 @@ func toCCMessages(messages []chatMessage) ([]ccMessage, string) {
 				Output:     &ccOutput{Type: "text", Value: resultText},
 			}}})
 		case "assistant":
+			if parts, ok := contentParts(msg.Content); ok {
+				var text strings.Builder
+				for _, part := range parts {
+					if part.Type == "text" {
+						text.WriteString(part.Text)
+					}
+				}
+				msg.Content, _ = json.Marshal(text.String())
+			}
 			if len(msg.ToolCalls) > 0 {
 				parts := []ccContentPart{}
 				if text, _, isString := contentText(msg.Content); isString && text != "" {

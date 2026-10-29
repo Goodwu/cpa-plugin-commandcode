@@ -77,7 +77,7 @@ func (e *claudeEncoder) ensureStart(frames [][]byte) [][]byte {
 	if e.startSent {
 		return frames
 	}
-	return append(frames, e.messageStart()...)
+	return append(e.messageStart(), frames...)
 }
 
 func (e *claudeEncoder) closeBlock() [][]byte {
@@ -154,8 +154,7 @@ func (e *claudeEncoder) resolveToolBlock(id string) *claudeToolBlock {
 	return block
 }
 
-// toolFrame handles both tool-call-delta and canonical tool-call events,
-// emitting partial_json increments once the block is open.
+// toolFrame reconciles incremental and canonical tool arguments for final flush.
 func (e *claudeEncoder) toolFrame(data map[string]any, canonical bool) ([][]byte, error) {
 	id := eventString(data, "toolCallId")
 	name := eventString(data, "toolName", "name")
@@ -186,54 +185,10 @@ func (e *claudeEncoder) toolFrame(data map[string]any, canonical bool) ([][]byte
 		inc = value
 	}
 
-	var frames [][]byte
-	if !block.opened {
-		if block.id == "" || block.name == "" {
-			// Cannot open a tool_use block without id/name yet: buffer.
-			if inc != "" {
-				block.pending.WriteString(inc)
-			}
-			return nil, nil
-		}
-		if inc == "" && block.pending.Len() == 0 {
-			return nil, nil
-		}
-		frames = append(frames, e.closeBlock()...)
-		block.index = e.nextIndex
-		e.nextIndex++
-		e.openIndex = block.index
-		e.openKind = "tool_use"
-		e.openTool = block.id
-		block.opened = true
-		frames = append(frames, claudeFrame("content_block_start", map[string]any{
-			"type": "content_block_start", "index": block.index,
-			"content_block": map[string]any{"type": "tool_use", "id": block.id, "name": block.name, "input": map[string]any{}},
-		}))
-		if buffered := block.pending.String(); buffered != "" {
-			block.emitted = buffered
-			block.pending.Reset()
-			frames = append(frames, claudeFrame("content_block_delta", map[string]any{
-				"type": "content_block_delta", "index": block.index,
-				"delta": map[string]any{"type": "input_json_delta", "partial_json": buffered},
-			}))
-		}
-	} else if e.openKind != "tool_use" || e.openTool != block.id {
-		// Interleaved tool streams: close the current block and re-anchor
-		// without re-emitting content_block_start.
-		frames = append(frames, e.closeBlock()...)
-		e.openKind = "tool_use"
-		e.openIndex = block.index
-		e.openTool = block.id
-	}
-	if inc == "" {
-		return frames, nil
-	}
-	block.emitted += inc
-	frames = append(frames, claudeFrame("content_block_delta", map[string]any{
-		"type": "content_block_delta", "index": block.index,
-		"delta": map[string]any{"type": "input_json_delta", "partial_json": inc},
-	}))
-	return frames, nil
+	// Buffer tools until finalization so interleaved A/B/A arguments never
+	// target a content block that has already stopped.
+	block.pending.WriteString(inc)
+	return nil, nil
 }
 
 // flushUnopenedTools guarantees buffered args are never lost: on finalize,
@@ -312,6 +267,9 @@ func (e *claudeEncoder) finalize() [][]byte {
 
 // emit converts one CC event into zero or more raw Claude SSE frames.
 func (e *claudeEncoder) emit(event ccEvent) ([][]byte, error) {
+	if e.sawFinish {
+		return nil, nil
+	}
 	switch event.Type {
 	case "start":
 		return e.ensureStart(nil), nil
@@ -339,20 +297,7 @@ func (e *claudeEncoder) emit(event ccEvent) ([][]byte, error) {
 		}
 		return append(frames, e.finalize()...), nil
 	case "error":
-		message := eventString(event.Data, "message")
-		if message == "" {
-			if nested, ok := event.Data["error"].(map[string]any); ok {
-				message = eventString(nested, "message")
-			}
-		}
-		if message == "" {
-			raw, _ := json.Marshal(event.Data)
-			message = string(raw)
-		}
-		hostLog("warn", "commandcode-go: claude upstream error: "+truncate(message, 200))
-		frames := e.ensureStart(nil)
-		frames = append(frames, e.textDelta("text", "text_delta", "text", "[upstream error] "+message)...)
-		return append(frames, e.finalize()...), nil
+		return e.failStream(eventErrorMessage(event)), nil
 	}
 	return nil, nil
 }
@@ -369,15 +314,13 @@ func (e *claudeEncoder) forceFinish() [][]byte {
 	return e.finalize()
 }
 
-// failStream closes any open block and ends the stream with the error
-// surfaced as text, keeping the Anthropic event grammar intact.
+// failStream terminates with the Anthropic error event.
 func (e *claudeEncoder) failStream(message string) [][]byte {
 	if e.sawFinish {
 		return nil
 	}
-	frames := e.ensureStart(nil)
-	frames = append(frames, e.textDelta("text", "text_delta", "text", "[upstream error] "+message)...)
-	return append(frames, e.finalize()...)
+	e.sawFinish = true
+	return [][]byte{claudeFrame("error", map[string]any{"type": "error", "error": map[string]any{"type": "api_error", "message": message}})}
 }
 
 // buildClaudeNonStreaming converts the aggregated CC result into a full

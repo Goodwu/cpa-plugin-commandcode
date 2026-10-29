@@ -31,7 +31,7 @@ func parseCCLine(line string) (ccEvent, bool) {
 		dataStr = rest
 	}
 	if dataStr == "[DONE]" {
-		return ccEvent{}, false
+		return ccEvent{Type: "done"}, true
 	}
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(dataStr), &parsed); err != nil {
@@ -78,4 +78,17 @@ func eventNumber(data map[string]any, key string) (float64, bool) {
 		}
 	}
 	return 0, false
+}
+
+func eventErrorMessage(event ccEvent) string {
+	if message := eventString(event.Data, "message"); message != "" {
+		return message
+	}
+	if nested, ok := event.Data["error"].(map[string]any); ok {
+		if message := eventString(nested, "message"); message != "" {
+			return message
+		}
+	}
+	raw, _ := json.Marshal(event.Data)
+	return string(raw)
 }

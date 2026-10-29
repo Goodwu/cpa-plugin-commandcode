@@ -16,11 +16,13 @@ import (
 // The host stamps "type" with the provider key on save, which is what
 // auth.parse matches on.
 type keyStorage struct {
-	Type    string `json:"type"`
-	APIKey  string `json:"api_key"`
-	Label   string `json:"label,omitempty"`
-	BaseURL string `json:"base_url,omitempty"`
-	Prefix  string `json:"prefix,omitempty"`
+	Disabled bool   `json:"disabled,omitempty"`
+	ProxyURL string `json:"proxy_url,omitempty"`
+	Type     string `json:"type"`
+	APIKey   string `json:"api_key"`
+	Label    string `json:"label,omitempty"`
+	BaseURL  string `json:"base_url,omitempty"`
+	Prefix   string `json:"prefix,omitempty"`
 }
 
 func parseKeyStorage(raw []byte) (*keyStorage, error) {
@@ -109,6 +111,8 @@ func buildAuthData(storage *keyStorage, fileName string) (*authData, error) {
 	}
 	return &authData{
 		Provider:    authProviderID,
+		Disabled:    storage.Disabled,
+		ProxyURL:    storage.ProxyURL,
 		ID:          fileName,
 		FileName:    fileName,
 		Label:       label,

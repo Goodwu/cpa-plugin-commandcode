@@ -15,7 +15,14 @@ import (
 // The request is JSON-encoded, the response envelope is decoded; the host
 // buffer is always released. A failed envelope (ok=false) is returned as a
 // *hostError so callers can branch on the code and message.
-func hostCall(method string, payload any) (json.RawMessage, error) {
+var hostCall = nativeHostCall
+
+func nativeHostCall(method string, payload any) (json.RawMessage, error) {
+	hostLifetime.RLock()
+	defer hostLifetime.RUnlock()
+	if hostClosed {
+		return nil, fmt.Errorf("plugin shut down")
+	}
 	var raw []byte
 	if payload != nil {
 		var errMarshal error

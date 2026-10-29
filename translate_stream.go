@@ -242,13 +242,9 @@ func openAIFinishReason(raw string) string {
 	return "stop"
 }
 
-// errorChunks surfaces upstream failures as a valid content+finish chunk pair:
-// clients always see a uniform stream shape instead of an ad-hoc error frame.
+// errorChunks exposes failure as an error envelope, never assistant content.
 func (e *streamEncoder) errorChunks(message string) [][]byte {
-	hostLog("warn", "commandcode-go: upstream error in stream: "+truncate(message, 200))
-	content := e.encodeChunk(map[string]any{"content": "[upstream error] " + message}, nil)
-	finish := e.encodeChunk(map[string]any{}, ptrString("stop"))
-	return append(content, finish...)
+	return [][]byte{marshalJSON(map[string]any{"error": map[string]any{"type": "upstream_error", "message": message}})}
 }
 
 // finishChunks synthesizes the terminal delta for streams that ended without
@@ -318,12 +314,7 @@ type aggregateResult struct {
 func applyAggregateEvent(sink *aggregateResult, event ccEvent) {
 	switch event.Type {
 	case "error":
-		message := eventString(event.Data, "message")
-		if message == "" {
-			if nested, ok := event.Data["error"].(map[string]any); ok {
-				message = eventString(nested, "message")
-			}
-		}
+		message := eventErrorMessage(event)
 		sink.UpstreamErr = message
 	case "text-delta":
 		sink.Content.WriteString(eventString(event.Data, "text"))

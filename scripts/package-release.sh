@@ -48,7 +48,7 @@ command -v python3 >/dev/null 2>&1 || {
   exit 1
 }
 mkdir -p "$DIST_DIR"
-rm -f "$DIST_DIR/$ARCHIVE" "$DIST_DIR/checksums.txt"
+rm -f "$DIST_DIR/$ARCHIVE"
 python3 - "$PLUGIN" "$DIST_DIR/$ARCHIVE" "$DIST_DIR/checksums.txt" <<'PY'
 import hashlib
 import pathlib
@@ -61,7 +61,10 @@ checksums = pathlib.Path(sys.argv[3])
 with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as output:
     output.write(plugin, plugin.name)
 digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-checksums.write_text(f"{digest}  {archive.name}\n", encoding="utf-8")
+lines = checksums.read_text().splitlines() if checksums.exists() else []
+lines = [line for line in lines if not line.endswith("  " + archive.name)]
+lines.append(f"{digest}  {archive.name}")
+checksums.write_text("\n".join(sorted(lines)) + "\n", encoding="utf-8")
 PY
 
 printf 'Created %s and checksums.txt\n' "$DIST_DIR/$ARCHIVE"

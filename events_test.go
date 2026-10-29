@@ -32,7 +32,7 @@ func TestParseCCLineNestedAndPrefix(t *testing.T) {
 }
 
 func TestParseCCLineDoneAndNoise(t *testing.T) {
-	for _, line := range []string{"", "   ", "data: [DONE]", "keepalive", "{not json", `{"no_type":1}`} {
+	for _, line := range []string{"", "   ", "keepalive", "{not json", `{"no_type":1}`} {
 		if _, ok := parseCCLine(line); ok {
 			t.Fatalf("line %q should not parse to an event", line)
 		}
