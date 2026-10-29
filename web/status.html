@@ -104,6 +104,7 @@
   var RESET_API = "/v0/management/plugins/commandcode-go/reset-stats";
   var storageKeys = ["cli-proxy-auth", "management-key", "cpa-management-key", "cpa-management-secret"];
   var keyCache = null;
+  var authFailed = false;
   var timer = null;
 
   function el(id) { return document.getElementById(id); }
@@ -118,6 +119,8 @@
   function extractKey(raw) {
     if (!raw) return "";
     var value = String(raw).trim();
+    // Management Center's obfuscated storage is not a usable bearer token.
+    if (value.indexOf("enc::") === 0) return "";
     if (value.charAt(0) === "{") {
       try {
         var parsed = JSON.parse(value);
@@ -129,12 +132,12 @@
 
   function managementKey() {
     if (keyCache) return keyCache;
+    var session = extractKey(sessionStorage.getItem("cc-status-key"));
+    if (session) { keyCache = session; return session; }
     for (var i = 0; i < storageKeys.length; i++) {
       var k = extractKey(localStorage.getItem(storageKeys[i]));
       if (k) { keyCache = k; return k; }
     }
-    var session = extractKey(sessionStorage.getItem("cc-status-key"));
-    if (session) { keyCache = session; return session; }
     return "";
   }
 
@@ -331,11 +334,13 @@
   }
 
   function load() {
+    if (authFailed) { askForKey(); return; }
     var key = managementKey();
     if (!key) { askForKey(); return; }
     fetch(API, { headers: { "Authorization": "Bearer " + key }, cache: "no-store" })
       .then(function (res) {
         if (res.status === 401 || res.status === 403) {
+          authFailed = true;
           keyCache = null;
           askForKey();
           throw new Error("管理密钥无效或已过期");
@@ -354,11 +359,13 @@
   el("save").addEventListener("click", function () {
     var value = el("key").value.trim();
     if (!value) return;
+    authFailed = false;
     sessionStorage.setItem("cc-status-key", value);
     keyCache = value;
     load();
   });
   el("reset").addEventListener("click", function () {
+    if (authFailed) { askForKey(); return; }
     var key = managementKey();
     if (!key) { askForKey(); return; }
     fetch(RESET_API, { method: "POST", headers: { "Authorization": "Bearer " + key } })
