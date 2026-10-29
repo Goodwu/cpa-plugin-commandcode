@@ -527,7 +527,7 @@ func round2(value float64) float64 {
 	return value
 }
 
-// Aliases let the management snapshot resolve the current credential cache.
+// Bind auth IDs to credential identities to isolate quota caches and calibration.
 var quotaIdentities = map[string]string{}
 
 func bindQuotaIdentity(authID, identity string) {

@@ -177,7 +177,7 @@ func TestQuotaIdentitySwitchAndWindows(t *testing.T) {
 	bindQuotaIdentity("switch", "keyB")
 	bindQuotaIdentity("switch", "keyA")
 	if _, ok := lookupQuotaCache("switch"); !ok {
-		t.Fatal("management alias lost")
+		t.Fatal("quota identity alias lost")
 	}
 	if len(localQuotaFallback("switch", nil).Groups) != 0 {
 		t.Fatal("old calibration survived identity change")

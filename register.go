@@ -35,7 +35,6 @@ type registrationResponse struct {
 		ExecutorInputFormats  []string `json:"executor_input_formats,omitempty"`
 		ExecutorOutputFormats []string `json:"executor_output_formats,omitempty"`
 		QuotaProvider         bool     `json:"quota_provider"`
-		ManagementAPI         bool     `json:"management_api"`
 	} `json:"capabilities"`
 }
 
@@ -68,7 +67,6 @@ func registrationPayload() registrationResponse {
 	// v8 quota_provider surfaces plan windows on CPA's credential cards; v7
 	// hosts ignore unknown capability keys.
 	resp.Capabilities.QuotaProvider = true
-	resp.Capabilities.ManagementAPI = true
 	return resp
 }
 
@@ -116,10 +114,6 @@ func dispatch(method string, request []byte) ([]byte, error) {
 		return handleQuotaFetch(request)
 	case "quota.reset":
 		return handleQuotaReset(request)
-	case "management.register":
-		return handleManagementRegister(request)
-	case "management.handle":
-		return handleManagementHandle(request)
 	default:
 		return errorEnvelope("unknown_method", "unknown method: "+strings.TrimSpace(method)), nil
 	}

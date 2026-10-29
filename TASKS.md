@@ -7,9 +7,6 @@
 - [ ] 会话亲和的生产端到端验证（同一会话头连发两次请求，确认上游 x-session-id 复用）
   - status: todo
   - context: archives/conversations/cliproxy-commandcode-go-plugin.md
-- [ ] （可选）安装 agent-browser 后做资源页视觉验证
-  - status: todo
-  - context: archives/conversations/cliproxy-commandcode-go-plugin.md
 - [ ] （可选）向 CLIProxyAPI-Plugins-Store 提交 registry PR（v0.2.0 已发布）
   - status: todo
   - context: archives/conversations/cliproxy-commandcode-go-plugin.md
@@ -18,6 +15,7 @@
 - （暂无）
 
 ## Recently Done（最近完成，最多 5-10 条）
+- [x] 按要求整体删除独立状态页、侧栏入口及诊断接口，部署0.2.4；浏览器确认入口消失、旧公共地址404、统一额度刷新正常，vet/test/race/build通过
 - [x] 统一5小时/每周/月度额度文案并移除月度分隔线；补GOAT和两类Pro分母回归，明确静态CLI套餐表来源与非Go真实验证缺口；前端检查通过并部署
 - [x] 部署月度文案微调：隐藏重复Monthly credits分组标题，中文月度额度标签；静态渲染确认标题消失、中文及22.7%保留，前端完整检查通过
 - [x] 部署0.2.3：状态页不再误用混淆密钥并停止认证失败自动重试；离线复现旧版7次失败与新版0次，真实状态页停留75秒后配额刷新成功，无再次封禁

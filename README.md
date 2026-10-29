@@ -71,20 +71,11 @@ JSON
 
 重启 CPA 即生效。支持多文件多 key（宿主负责轮转与失败切换）；每个 auth 文件可用 `"base_url"` 字段单独覆盖上游地址。无交互式登录：`auth.login.*` 明确返回不支持。
 
-## 状态页与额度
+## 额度
 
-插件声明 `management_api` + `quota_provider`（CPA v8），额度可直接显示在 CPA 管理中心的凭证卡片，同时提供独立状态页：
+插件声明 `quota_provider`（CPA v8），在支持通用插件额度的管理中心，直接通过「配额管理」以及认证文件卡片查看额度。5小时、每周及月度订阅 credits 在统一卡片中展示剩余比例和重置时间。
 
-```
-http://localhost:8317/v0/resource/plugins/commandcode-go/status
-```
-
-页面展示：凭证列表、5 小时/周额度窗口及月度订阅 credits（剩余比例 + 重置时间）、请求与 token 统计、最近请求与错误。月度总额采用官方 CLI 1.88.2 的已知套餐分配；未知套餐、余额缺失或非有效账期不推算比例，购买及免费 credits 不混入订阅月度比例。数据接口需要管理密钥（页面会复用兼容的已保存密钥，否则提示手动输入；认证失败后停止自动重试，避免触发宿主 IP 封禁）：
-
-```
-GET  /v0/management/plugins/commandcode-go/status       # JSON 快照
-POST /v0/management/plugins/commandcode-go/reset-stats  # 清空本地统计
-```
+月度总额采用官方 CLI 1.88.2 的已知套餐分配；未知套餐、余额缺失或非有效账期不推算比例，购买及免费 credits 不混入订阅月度比例。插件不再提供独立状态页、左侧菜单或状态/清空统计接口。
 
 ### 额度数据从哪来
 
@@ -126,7 +117,7 @@ Claude Code / Codex / 任意 OpenAI 兼容客户端按 CPA 常规方式接即可
 
 真实订阅 key 端到端验收已通过（2026-10-28，CPA 源码 v7.2.141 沙箱实例，以及生产 brew v8.0.40 实例）：OpenAI Chat Completions、Claude Messages、Codex Responses 三个 surface 的流式与非流式、thinking 块、工具调用流、usage 明细、断连清理均正常。
 
-额度与状态页（2026-10-29，生产 v8.0.40）：`quota_provider` 生效（`supports_quota: true`），`/v8/management/plugins/commandcode-go/quota` 返回实时 5 小时/周窗口（剩余比例、重置时间、套餐、剩余 credits）；资源页与 JSON 接口可访问；未配置 `billing_api_key` 时正确回退本地统计。
+额度（2026-10-29，生产 v8.0.40）：`quota_provider` 生效（`supports_quota: true`），`/v8/management/plugins/commandcode-go/quota` 返回实时 5 小时/周窗口（剩余比例、重置时间、套餐、剩余 credits）；CLI 登录 key 不可用时回退本地观察。
 
 ## 开发
 
@@ -147,8 +138,6 @@ translate_claude.go    CC 事件 → Anthropic 原生 SSE / 非流式 message（
 executor.go        executor.execute / execute_stream / count_tokens
 state.go           进程内状态：请求记录、滚动窗口计数、429 校准
 quota.go           quota.* RPC：CLI billing 端点/429/本地计数三层额度
-management.go      management.* RPC：资源页与 JSON 数据接口
-web/status.html    状态页（单文件，内联样式/脚本，go:embed）
 version.go         npm CLI 版本刷新
 ```
 

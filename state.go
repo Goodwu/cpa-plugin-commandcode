@@ -187,7 +187,7 @@ type authSnapshot struct {
 	RateLimit     *rateLimitSnapshot            `json:"rate_limit,omitempty"`
 }
 
-// stateSnapshot is the status payload served to the management page.
+// stateSnapshot captures local observations used by the quota fallback.
 type stateSnapshot struct {
 	StartedAt string          `json:"started_at"`
 	UptimeSec int64           `json:"uptime_sec"`
