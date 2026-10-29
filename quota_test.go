@@ -163,6 +163,16 @@ func TestMonthlyQuotaBucket(t *testing.T) {
 	if bucket == nil || bucket.Window != "monthly" || bucket.RemainingFraction != left/10 || bucket.ResetTime != plan.period {
 		t.Fatalf("monthly bucket = %+v", bucket)
 	}
+	// The denominator follows the exact CLI plan ID, including old/new Pro.
+	for id, total := range map[string]float64{"individual-goat": 70, "individual-pro": 30, "individual-pro-v1": 80} {
+		other := plan
+		other.planID = id
+		balance := total / 4
+		b := monthlyQuotaBucket(other, &balance, now)
+		if b == nil || b.RemainingFraction != 0.25 {
+			t.Fatalf("%s: expected 25%% with allocation %.0f, got %+v", id, total, b)
+		}
+	}
 	for _, id := range []string{"unknown", "individual-go-v99"} {
 		other := plan
 		other.planID = id

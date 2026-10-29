@@ -93,6 +93,8 @@ POST /v0/management/plugins/commandcode-go/reset-stats  # 清空本地统计
 
 额度请求全程只读 GET，不消耗生成额度；结果缓存 60 秒，套餐信息缓存 5 分钟。
 
+月度百分比的余额来自 `/alpha/billing/credits`，套餐 ID 与账期来自 `/alpha/billing/subscriptions`；这两个接口目前没有返回月度总额。分母采用 CLI 1.88.2 的静态套餐表：Go/Go-v1 10、GOAT 70、旧 Pro 30、Pro-v1 80 credits（按精确 plan ID 区分）。此表不会随 CLI 版本自动更新；当前仅 Go 账号经过真实验证，其他套餐需账号或上游额度定义进一步核对，不能保证套餐调整后仍准确。按模型的促销/倍增用量并不等于这个基础 credits 分母。
+
 ## 使用
 
 模型 ID 以 `GET /v1/models` 为准（完整 ID，如 `deepseek/deepseek-v4-pro`）。别名（`deepseek-v4-pro`、`glm5.2` 等）由插件内部解析，但**客户端必须请求 CPA 已注册的完整 ID**，否则宿主机由不会把它路由到本插件。
