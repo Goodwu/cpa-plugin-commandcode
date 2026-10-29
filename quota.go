@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -97,10 +98,10 @@ type ccWindowLimit struct {
 
 type ccCreditsResponse struct {
 	Credits struct {
-		BelowThreshold   bool    `json:"belowThreshold"`
-		MonthlyCredits   float64 `json:"monthlyCredits"`
-		PurchasedCredits float64 `json:"purchasedCredits"`
-		FreeCredits      float64 `json:"freeCredits"`
+		BelowThreshold   bool     `json:"belowThreshold"`
+		MonthlyCredits   *float64 `json:"monthlyCredits"`
+		PurchasedCredits float64  `json:"purchasedCredits"`
+		FreeCredits      float64  `json:"freeCredits"`
 	} `json:"credits"`
 	WindowLimits *struct {
 		Limited  bool           `json:"limited"`
@@ -138,6 +139,7 @@ type planCacheEntry struct {
 	at     time.Time
 	planID string
 	period string
+	status string
 }
 
 var quotaCache = struct {
@@ -268,17 +270,19 @@ func fetchQuotaFromBilling(callbackID, apiBase, apiKey, authID string) (quotaFet
 		}
 	}
 
-	resp.Summary = append(resp.Summary,
-		quotaMetric{Key: "monthly_credits", Label: "Monthly credits left", Value: round2(credits.Credits.MonthlyCredits), Unit: "credits", Format: "number"},
-	)
+	if credits.Credits.MonthlyCredits != nil {
+		resp.Summary = append(resp.Summary, quotaMetric{Key: "monthly_credits", Label: "Monthly credits left", Value: round2(*credits.Credits.MonthlyCredits), Unit: "credits", Format: "number"})
+	}
 	if credits.Credits.PurchasedCredits > 0 {
 		resp.Summary = append(resp.Summary,
 			quotaMetric{Key: "purchased_credits", Label: "Extra credits", Value: round2(credits.Credits.PurchasedCredits), Unit: "credits", Format: "number"},
 		)
 	}
-	if planID, period := getPlan(callbackID, apiBase, apiKey, cliVersion, authID); planID != "" {
-		resp.Subscription = &quotaSubscription{Plan: planID, TierID: planID}
-		_ = period
+	if plan := getPlan(callbackID, apiBase, apiKey, cliVersion, authID); plan.planID != "" {
+		resp.Subscription = &quotaSubscription{Plan: plan.planID, TierID: plan.planID}
+		if bucket := monthlyQuotaBucket(plan, credits.Credits.MonthlyCredits, time.Now()); bucket != nil {
+			resp.Groups = append(resp.Groups, quotaGroup{DisplayName: "Monthly credits", Buckets: []quotaBucket{*bucket}})
+		}
 	}
 	quotaCache.mu.Lock()
 	identity := fmt.Sprintf("%s:%x", authID, sha256.Sum256([]byte(apiBase+"\x00"+apiKey)))
@@ -308,12 +312,34 @@ func getCredits(callbackID, apiBase, apiKey, cliVersion string) (*ccCreditsRespo
 	return &parsed, response.StatusCode, nil
 }
 
-func getPlan(callbackID, apiBase, apiKey, cliVersion, authID string) (string, string) {
+// Exact plan allocations shipped by command-code CLI 1.88.2 (getPlanInfo).
+// Do not infer allocations for unknown plans or include purchased/free credits
+// in the subscription's monthly ratio.
+func monthlyQuotaBucket(plan planCacheEntry, remaining *float64, now time.Time) *quotaBucket {
+	allocations := map[string]float64{
+		"individual-go": 10, "individual-go-v1": 10, "individual-goat": 70,
+		"individual-pro": 30, "individual-pro-v1": 80, "individual-provider": 15,
+		"individual-max": 150, "individual-ultra": 300, "teams-pro": 40,
+	}
+	total, known := allocations[plan.planID]
+	if !known || plan.status != "active" || remaining == nil || math.IsNaN(*remaining) || math.IsInf(*remaining, 0) {
+		return nil
+	}
+	reset, err := time.Parse(time.RFC3339, plan.period)
+	if err != nil || !reset.After(now) {
+		return nil
+	}
+	fraction := math.Max(0, math.Min(1, *remaining/total))
+	return &quotaBucket{Window: "monthly", RemainingFraction: fraction, ResetTime: reset.UTC().Format(time.RFC3339),
+		Description: fmt.Sprintf("Monthly subscription credits: %.2f / %.2f remaining (CLI plan allocation)", *remaining, total)}
+}
+
+func getPlan(callbackID, apiBase, apiKey, cliVersion, authID string) planCacheEntry {
 	authID = fmt.Sprintf("%s:%x", authID, sha256.Sum256([]byte(apiBase+"\x00"+apiKey)))
 	planCache.mu.Lock()
 	if entry, ok := planCache.items[authID]; ok && time.Since(entry.at) < planCacheTTL {
 		planCache.mu.Unlock()
-		return entry.planID, entry.period
+		return entry
 	}
 	planCache.mu.Unlock()
 
@@ -323,18 +349,19 @@ func getPlan(callbackID, apiBase, apiKey, cliVersion, authID string) (string, st
 		Headers: buildUsageHeaders(apiKey, cliVersion),
 	})
 	if errCall != nil || response.StatusCode != http.StatusOK {
-		return "", ""
+		return planCacheEntry{}
 	}
 	var parsed ccSubscriptionResponse
 	if errUnmarshal := json.Unmarshal(response.Body, &parsed); errUnmarshal != nil {
-		return "", ""
+		return planCacheEntry{}
 	}
 	planID := strings.TrimSpace(parsed.Data.PlanID)
 	period := strings.TrimSpace(parsed.Data.CurrentPeriodEnd)
 	planCache.mu.Lock()
-	planCache.items[authID] = planCacheEntry{at: time.Now(), planID: planID, period: period}
+	entry := planCacheEntry{at: time.Now(), planID: planID, period: period, status: strings.TrimSpace(parsed.Data.Status)}
+	planCache.items[authID] = entry
 	planCache.mu.Unlock()
-	return planID, period
+	return entry
 }
 
 // buildUsageHeaders mirrors the CLI headers for read-only billing calls.

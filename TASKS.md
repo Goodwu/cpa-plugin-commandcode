@@ -4,9 +4,6 @@
 - （暂无）
 
 ## Next（近期候选，最多 10 条）
-- [ ] 部署状态页认证失败停止重试修复（源码已完成）
-  - status: todo
-  - context: archives/conversations/cliproxy-commandcode-go-plugin.md
 - [ ] 会话亲和的生产端到端验证（同一会话头连发两次请求，确认上游 x-session-id 复用）
   - status: todo
   - context: archives/conversations/cliproxy-commandcode-go-plugin.md
@@ -21,6 +18,8 @@
 - （暂无）
 
 ## Recently Done（最近完成，最多 5-10 条）
+- [x] 部署0.2.3：状态页不再误用混淆密钥并停止认证失败自动重试；离线复现旧版7次失败与新版0次，真实状态页停留75秒后配额刷新成功，无再次封禁
+- [x] 补齐月度订阅比例：按CLI已知套餐分配，未知/无效账期不猜测；生产卡片显示22.7%剩余及11/20重置，race/vet/test/build与前端检查通过
 - [x] 生产统一配额页面验收：全部4个配额凭证、CommandCode分类仅1个且在分类栏下统一网格；真实5h/周额度、单卡刷新及时间线通过
 - [x] 移出被CPA递归扫描的验证备份，浏览器确认5个正式凭证且CommandCode仅1个；隔离构建并部署统一配额页面
 - [x] 本地通用插件额度接入统一机制，移除独立区域；Critical Reviewer 复审通过，431项测试及模拟浏览器跨页面验证通过

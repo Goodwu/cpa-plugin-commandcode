@@ -154,3 +154,43 @@ func TestQuotaCacheTTL(t *testing.T) {
 		t.Fatal("stale entry should miss")
 	}
 }
+
+func TestMonthlyQuotaBucket(t *testing.T) {
+	now := time.Date(2026, 10, 29, 0, 0, 0, 0, time.UTC)
+	left := 2.2732537195
+	plan := planCacheEntry{planID: "individual-go-v1", status: "active", period: "2026-11-20T04:01:33Z"}
+	bucket := monthlyQuotaBucket(plan, &left, now)
+	if bucket == nil || bucket.Window != "monthly" || bucket.RemainingFraction != left/10 || bucket.ResetTime != plan.period {
+		t.Fatalf("monthly bucket = %+v", bucket)
+	}
+	for _, id := range []string{"unknown", "individual-go-v99"} {
+		other := plan
+		other.planID = id
+		if monthlyQuotaBucket(other, &left, now) != nil {
+			t.Fatal("unknown plan must not get a guessed denominator")
+		}
+	}
+	for _, status := range []string{"canceled", "past_due", ""} {
+		other := plan
+		other.status = status
+		if monthlyQuotaBucket(other, &left, now) != nil {
+			t.Fatal("inactive subscription must not report a monthly reset")
+		}
+	}
+	if monthlyQuotaBucket(plan, nil, now) != nil {
+		t.Fatal("missing balance must not become zero")
+	}
+	expired := plan
+	expired.period = "2026-10-20T04:01:33Z"
+	if monthlyQuotaBucket(expired, &left, now) != nil {
+		t.Fatal("expired cycle must not report a future reset")
+	}
+	over := 12.0
+	if b := monthlyQuotaBucket(plan, &over, now); b == nil || b.RemainingFraction != 1 {
+		t.Fatal("fraction must be capped")
+	}
+	var parsed ccCreditsResponse
+	if err := json.Unmarshal([]byte(`{"credits":{}}`), &parsed); err != nil || parsed.Credits.MonthlyCredits != nil {
+		t.Fatal("missing monthly balance must stay absent")
+	}
+}
