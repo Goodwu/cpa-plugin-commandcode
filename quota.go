@@ -178,11 +178,9 @@ func handleQuotaFetch(request []byte) ([]byte, error) {
 	}
 	storage, _ := parseKeyStorage(req.StorageJSON)
 	apiKey := ""
-	billingKey := ""
 	baseURLOverride := ""
 	if storage != nil {
 		apiKey = strings.TrimSpace(storage.APIKey)
-		billingKey = strings.TrimSpace(storage.BillingAPIKey)
 		baseURLOverride = storage.BaseURL
 	}
 	if apiKey == "" {
@@ -195,7 +193,7 @@ func handleQuotaFetch(request []byte) ([]byte, error) {
 		return okEnvelope(cached)
 	}
 
-	resp, errFetch := fetchQuotaFromBilling(req.HostCallbackID, apiBase, apiKey, billingKey, authID)
+	resp, errFetch := fetchQuotaFromBilling(req.HostCallbackID, apiBase, apiKey, authID)
 	if errFetch != nil {
 		resp = localQuotaFallback(authID, errFetch)
 	}
@@ -205,17 +203,9 @@ func handleQuotaFetch(request []byte) ([]byte, error) {
 
 // fetchQuotaFromBilling reads the CLI billing endpoint (the same one `cmd`
 // uses for its /usage panel) and normalizes window limits into quota buckets.
-func fetchQuotaFromBilling(callbackID, apiBase, apiKey, billingKey, authID string) (quotaFetchResponse, error) {
+func fetchQuotaFromBilling(callbackID, apiBase, apiKey, authID string) (quotaFetchResponse, error) {
 	cliVersion := currentCLIVersion(callbackID)
-	key := apiKey
-	if billingKey != "" {
-		key = billingKey
-	}
-	credits, status, errCredits := getCredits(callbackID, apiBase, key, cliVersion)
-	if errCredits == nil && status == http.StatusUnauthorized && billingKey != "" && billingKey != apiKey {
-		// The main key may be a provider key; retry with the explicit billing key.
-		credits, status, errCredits = getCredits(callbackID, apiBase, apiKey, cliVersion)
-	}
+	credits, status, errCredits := getCredits(callbackID, apiBase, apiKey, cliVersion)
 	if errCredits != nil || status != http.StatusOK || credits == nil {
 		msg := "billing request failed"
 		if errCredits != nil {
@@ -275,7 +265,7 @@ func fetchQuotaFromBilling(callbackID, apiBase, apiKey, billingKey, authID strin
 			quotaMetric{Key: "purchased_credits", Label: "Extra credits", Value: round2(credits.Credits.PurchasedCredits), Unit: "credits", Format: "number"},
 		)
 	}
-	if planID, period := getPlan(callbackID, apiBase, key, cliVersion, authID); planID != "" {
+	if planID, period := getPlan(callbackID, apiBase, apiKey, cliVersion, authID); planID != "" {
 		resp.Subscription = &quotaSubscription{Plan: planID, TierID: planID}
 		_ = period
 	}
@@ -442,8 +432,12 @@ func localQuotaFallback(authID string, cause error) quotaFetchResponse {
 		}
 	}
 	if cause != nil {
+		message := cause.Error()
+		if strings.Contains(message, "401") {
+			message = "额度需 CLI 登录 key（~/.commandcode/auth.json 的 apiKey）；当前 key 只能推理，显示本地统计"
+		}
 		resp.Summary = append(resp.Summary, quotaMetric{
-			Key: "billing_error", Label: cause.Error(), Format: "text",
+			Key: "billing_error", Label: message, Format: "text",
 		})
 	}
 	return resp

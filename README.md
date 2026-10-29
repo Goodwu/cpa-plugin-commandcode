@@ -50,15 +50,24 @@ plugins:
       # project_slug: "my-project"              # 可选：x-project-slug 头
 ```
 
-## 凭证
+## 凭证（二选一）
 
-API key 从 https://commandcode.ai/settings 获取，写入宿主 auth 目录（默认 `~/.cli-proxy-api`）：
+写入宿主 auth 目录（默认 `~/.cli-proxy-api`）：
 
 ```bash
 cat > ~/.cli-proxy-api/commandcode-go-main.json <<'JSON'
-{"type":"commandcode-go","api_key":"<你的 key>","label":"main"}
+{"type":"commandcode-go","api_key":"<你的 key>","label":"main","prefix":"cc"}
 JSON
 ```
+
+`api_key` 只有一个字段，从下面两种来源里**任选其一**：
+
+| key 来源 | 推理（`/alpha/generate`） | 读取额度（5 小时/周窗口） |
+|---|---|---|
+| `~/.commandcode/auth.json` 的 `apiKey`（CLI 登录 key，**推荐**） | ✅ | ✅ |
+| https://commandcode.ai/settings 新建的 API key | ✅ | ❌（billing 端点返回 401，页面显示本地统计） |
+
+> 原因：CommandCode 的 `/alpha/billing/credits|subscriptions` 只对 CLI 登录 key 开放。settings 里新建的 API key 能正常推理，但读不到额度。两种 key 在 `/alpha/generate` 上都已验证可用。
 
 重启 CPA 即生效。支持多文件多 key（宿主负责轮转与失败切换）；每个 auth 文件可用 `"base_url"` 字段单独覆盖上游地址。无交互式登录：`auth.login.*` 明确返回不支持。
 
@@ -79,15 +88,8 @@ POST /v0/management/plugins/commandcode-go/reset-stats  # 清空本地统计
 
 ### 额度数据从哪来
 
-CommandCode 的额度只对 **CLI 登录 key** 开放（`/alpha/billing/credits`、`/alpha/billing/subscriptions`），而 Provider/API key 调用这些端点会返回 401（但可以正常推理）。因此：
-
-- 实时额度：在 auth 文件里补一个只读用的 `billing_api_key`（从 `~/.commandcode/auth.json` 的 `apiKey` 复制）：
-
-```json
-{"type":"commandcode-go","api_key":"<推理用的 key>","billing_api_key":"<CLI 登录 key>","label":"main","prefix":"cc"}
-```
-
-- 未配置或请求失败时自动回退：先使用最近一次 429 响应里的 `rateLimit{limit,remaining,reset,window}` 校准值，再退到「本地 5 小时滚动请求计数」，页面会标注数据来源。
+- **auth 的 key 是 CLI 登录 key** → 调 `/alpha/billing/credits` 与 `/alpha/billing/subscriptions`，显示实时 5 小时/周窗口、剩余 credits 与套餐；页面标注「实时」。
+- **auth 的 key 是 settings 新建的 API key**（billing 返回 401）→ 自动回退：先用最近一次 429 响应里的 `rateLimit{limit,remaining,reset,window}` 校准值，再退到「本地 5 小时滚动请求计数」，页面标注「本地估算」。
 
 额度请求全程只读 GET，不消耗生成额度；结果缓存 60 秒，套餐信息缓存 5 分钟。
 

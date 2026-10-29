@@ -18,6 +18,7 @@
 - （暂无）
 
 ## Recently Done（最近完成，最多 5-10 条）
+- [x] v0.2.1：凭证改为单 key 二选一（CLI 登录 key 兼顾推理+额度；settings 的 API key 仅推理）。实测两种 key 均可推理，生产已切换为 CLI 登录 key 并验证额度与推理
 - [x] v0.2.0：管理资源页 + 额度能力（`management_api` + `quota_provider`）。额度经 CLI billing 端点取实时 5h/周窗口，429 与本地计数兜底；生产验证 `supports_quota: true`、额度与页面均正常
 - [x] 逆向 command-code CLI（v1.88.2）定位额度渠道：`/alpha/billing/credits`、`/alpha/billing/subscriptions`、`/alpha/usage/summary`、`/alpha/whoami`；确认 billing 端点只认 CLI 登录 key
 - [x] 发布 v0.1.3：public 仓库 Goodwu/cpa-plugin-commandcode，tag 触发 release，四平台 zip + checksums 产物齐全，CI/Release 全绿

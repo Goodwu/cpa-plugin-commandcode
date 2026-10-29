@@ -245,7 +245,7 @@
       var hint = document.createElement("div");
       hint.className = "muted";
       hint.style.marginTop = "8px";
-      text(hint, "实时额度需要 CLI 登录 key；可在 auth 文件加 billing_api_key 后重试。");
+      text(hint, "实时额度需要 CommandCode CLI 登录 key（~/.commandcode/auth.json 的 apiKey）；用 settings 创建的 API key 只能推理，此处显示本地统计。");
       card.appendChild(hint);
     }
     return card;
