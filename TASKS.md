@@ -4,7 +4,7 @@
 - （暂无）
 
 ## Next（近期候选，最多 10 条）
-- [ ] 部署并真实后端验收通用插件额度前端，以及状态页认证失败停止重试修复（源码已完成）
+- [ ] 部署状态页认证失败停止重试修复（源码已完成）
   - status: todo
   - context: archives/conversations/cliproxy-commandcode-go-plugin.md
 - [ ] 会话亲和的生产端到端验证（同一会话头连发两次请求，确认上游 x-session-id 复用）
@@ -18,9 +18,12 @@
   - context: archives/conversations/cliproxy-commandcode-go-plugin.md
 
 ## Blocked（等待输入或外部条件）
-- （暂无）
+- [ ] 统一配额页面真实浏览器验收
+  - status: blocked；页面已部署、测试备份已移出扫描目录，正式CommandCode仅1个；等待用户重新登录验证全部及分类下真实额度
+  - context: archives/conversations/cliproxy-commandcode-go-plugin.md
 
 ## Recently Done（最近完成，最多 5-10 条）
+- [x] 移出被CPA递归扫描的验证备份，浏览器确认5个正式凭证且CommandCode仅1个；隔离构建并部署统一配额页面
 - [x] 本地通用插件额度接入统一机制，移除独立区域；Critical Reviewer 复审通过，431项测试及模拟浏览器跨页面验证通过
 - [x] 清除管理中心临时IP封禁，页面既有密钥登录成功；本地修复状态页401/403无限重试与混淆值误用
 - [x] 部署 0.2.2 并验收：生产五插件正常、实时额度、非流式正文、Claude 双工具流；隔离 v8.0.40 宿主验证会话亲和、错误脱敏/失败统计、长流卸载及重新加载推理；已有版本和配置可回滚
