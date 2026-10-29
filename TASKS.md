@@ -18,11 +18,10 @@
   - context: archives/conversations/cliproxy-commandcode-go-plugin.md
 
 ## Blocked（等待输入或外部条件）
-- [ ] 统一配额页面真实浏览器验收
-  - status: blocked；页面已部署、测试备份已移出扫描目录，正式CommandCode仅1个；等待用户重新登录验证全部及分类下真实额度
-  - context: archives/conversations/cliproxy-commandcode-go-plugin.md
+- （暂无）
 
 ## Recently Done（最近完成，最多 5-10 条）
+- [x] 生产统一配额页面验收：全部4个配额凭证、CommandCode分类仅1个且在分类栏下统一网格；真实5h/周额度、单卡刷新及时间线通过
 - [x] 移出被CPA递归扫描的验证备份，浏览器确认5个正式凭证且CommandCode仅1个；隔离构建并部署统一配额页面
 - [x] 本地通用插件额度接入统一机制，移除独立区域；Critical Reviewer 复审通过，431项测试及模拟浏览器跨页面验证通过
 - [x] 清除管理中心临时IP封禁，页面既有密钥登录成功；本地修复状态页401/403无限重试与混淆值误用
