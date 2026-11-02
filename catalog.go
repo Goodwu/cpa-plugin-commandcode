@@ -247,11 +247,13 @@ func categoryMinimumPlan(category string) string {
 }
 
 // catalogIDs returns the active catalog ids (static order first), skipping
-// models locked under the current plan context.
+// models locked under the current plan context. The switch is consulted on
+// every call, so switching filter_locked_models off takes effect immediately
+// even while a locked snapshot from an earlier refresh is still published.
 func catalogIDs() []string {
 	catalogMu.RLock()
 	defer catalogMu.RUnlock()
-	if len(currentCat.locked) == 0 {
+	if len(currentCat.locked) == 0 || !activeConfig().FilterLockedModels {
 		return append([]string(nil), currentCat.ids...)
 	}
 	ids := make([]string, 0, len(currentCat.ids))
@@ -266,13 +268,18 @@ func catalogIDs() []string {
 
 // modelLockReason reports whether the model is locked under the last applied
 // plan context and, when locked, the minimum plan id required to use it.
+// Like catalogIDs it consults the switch, so an off switch can never lock.
 func modelLockReason(id string) (string, bool) {
-	catalogMu.RLock()
-	defer catalogMu.RUnlock()
-	if _, isLocked := currentCat.locked[strings.ToLower(strings.TrimSpace(id))]; !isLocked {
+	if !activeConfig().FilterLockedModels {
 		return "", false
 	}
-	return currentCat.lockedPlan[strings.ToLower(strings.TrimSpace(id))], true
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
+	key := strings.ToLower(strings.TrimSpace(id))
+	if _, isLocked := currentCat.locked[key]; !isLocked {
+		return "", false
+	}
+	return currentCat.lockedPlan[key], true
 }
 
 // isModelLocked is the boolean form of modelLockReason for callers that do
@@ -286,18 +293,33 @@ func isModelLocked(id string) bool {
 // last segments the way resolveModel matches catalog entries. resolveModel
 // only resolves bare names against the filtered list, so a bare name equal
 // to a locked model's last segment would otherwise slip past the lock check.
+// When several locked ids share the suffix, the lowest tier that unlocks one
+// of them is reported — a deterministic, actionable claim rather than map
+// iteration order.
 func lockedBareNameReason(name string) (string, bool) {
+	if !activeConfig().FilterLockedModels {
+		return "", false
+	}
 	catalogMu.RLock()
 	defer catalogMu.RUnlock()
 	if len(currentCat.locked) == 0 {
 		return "", false
 	}
+	matched := false
+	best := ""
+	bestRank := 1 << 30
 	for key := range currentCat.locked {
-		if strings.EqualFold(key[strings.LastIndex(key, "/")+1:], name) {
-			return currentCat.lockedPlan[key], true
+		if !strings.EqualFold(key[strings.LastIndex(key, "/")+1:], name) {
+			continue
+		}
+		matched = true
+		if required := currentCat.lockedPlan[key]; required != "" {
+			if rank, known := planRanks[required]; known && rank < bestRank {
+				bestRank, best = rank, required
+			}
 		}
 	}
-	return "", false
+	return best, matched
 }
 
 // applyRemoteCatalog merges the provider API list over the static catalog:

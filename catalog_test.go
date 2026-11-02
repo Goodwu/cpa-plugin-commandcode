@@ -260,3 +260,99 @@ func TestCatalogTTLClosedFromRefreshHint(t *testing.T) {
 		}
 	}
 }
+
+// TestSwitchOffInvalidatesPublishedLockSnapshot covers the hot-reconfigure
+// path the second review flagged: a locked snapshot published while the
+// switch was on must stop filtering the moment the switch turns off — no
+// catalog refresh required — and resume if the switch turns back on.
+func TestSwitchOffInvalidatesPublishedLockSnapshot(t *testing.T) {
+	defer resetCatalog()
+	defer setPluginConfig(nil)
+	goCtx := planContext{filter: true, planID: "individual-go-v1"}
+	applyRemoteCatalog([]remoteModel{
+		{ID: "vendor/gated-model", Category: "opensource", MinimumPlan: planRefFor("individual-goat")},
+	}, goCtx, 900)
+	if !isModelLocked("vendor/gated-model") {
+		t.Fatal("sanity: model must be locked while the switch is on")
+	}
+
+	setPluginConfig([]byte("filter_locked_models: false\n"))
+	// No refresh happens between the two switch positions (stale snapshot).
+	if isModelLocked("vendor/gated-model") {
+		t.Fatal("switch off must invalidate the published lock set immediately")
+	}
+	found := false
+	for _, id := range catalogIDs() {
+		if id == "vendor/gated-model" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("switch off must list the previously locked model")
+	}
+	if got := resolveModel("gated-model"); got != "vendor/gated-model" {
+		t.Fatalf("bare name must resolve again while off, got %q", got)
+	}
+	if env := lockedModelEnvelope("vendor/gated-model"); env != nil {
+		t.Fatalf("switch off must not reject requests, got %s", env)
+	}
+
+	// A refresh that captured its plan context before the switch flipped may
+	// still publish a locked snapshot afterwards; it must stay inert while off.
+	applyRemoteCatalog([]remoteModel{
+		{ID: "vendor/gated-model", Category: "opensource", MinimumPlan: planRefFor("individual-goat")},
+	}, goCtx, 900)
+	if isModelLocked("vendor/gated-model") {
+		t.Fatal("in-flight refresh must not re-enable filtering while off")
+	}
+
+	setPluginConfig([]byte("filter_locked_models: true\n"))
+	if !isModelLocked("vendor/gated-model") {
+		t.Fatal("switch back on restores the last known lock state")
+	}
+}
+
+// TestLockedBareNameReasonPicksLowestTier pins the deterministic claim for
+// same-suffix collisions: the lowest tier that unlocks one of the models.
+func TestLockedBareNameReasonPicksLowestTier(t *testing.T) {
+	defer resetCatalog()
+	defer setPluginConfig(nil)
+	applyRemoteCatalog([]remoteModel{
+		{ID: "a/dup", Category: "opensource", MinimumPlan: planRefFor("individual-goat")},
+		{ID: "b/dup", Category: "opensource", MinimumPlan: planRefFor("individual-pro")},
+		{ID: "c/dup", Category: "opensource", MinimumPlan: planRef{set: true, null: true}},
+	}, planContext{filter: true, planID: "individual-go-v1"}, 900)
+	required, locked := lockedBareNameReason("dup")
+	if !locked || required != "individual-goat" {
+		t.Fatalf("bare collision = %q %v, want individual-goat true (lowest claimable tier)", required, locked)
+	}
+	if _, locked := lockedBareNameReason("unmatched"); locked {
+		t.Fatal("unmatched bare name must not lock")
+	}
+}
+
+// TestCatalogAndLockConsultsRaceFree exercises concurrent consultation and
+// publish under the race detector.
+func TestCatalogAndLockConsultsRaceFree(t *testing.T) {
+	defer resetCatalog()
+	defer setPluginConfig(nil)
+	goCtx := planContext{filter: true, planID: "individual-go-v1"}
+	models := []remoteModel{
+		{ID: "vendor/gated-model", Category: "opensource", MinimumPlan: planRefFor("individual-goat")},
+		{ID: "vendor/open-model", Category: "opensource", MinimumPlan: planRefFor("individual-go")},
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			applyRemoteCatalog(models, goCtx, 900)
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		catalogIDs()
+		isModelLocked("vendor/gated-model")
+		lockedBareNameReason("gated-model")
+		displayNameFor("vendor/open-model")
+	}
+	<-done
+}
