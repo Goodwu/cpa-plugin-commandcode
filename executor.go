@@ -150,13 +150,19 @@ func lockedModelEnvelope(model string) []byte {
 	if !activeConfig().FilterLockedModels {
 		return nil
 	}
-	required, locked := modelLockReason(model)
+	resolved := strings.TrimSpace(model)
+	required, locked := modelLockReason(resolved)
+	if !locked && !strings.Contains(resolved, "/") {
+		// Bare names never resolve to a locked catalog id (resolution skips
+		// them), so match the locked set's last segments directly.
+		required, locked = lockedBareNameReason(resolved)
+	}
 	if !locked {
 		return nil
 	}
-	message := fmt.Sprintf("commandcode-go: model %q is not available on the current plan", model)
+	message := fmt.Sprintf("commandcode-go: model %q is not available on the current plan", resolved)
 	if required != "" {
-		message = fmt.Sprintf("commandcode-go: model %q is not available on the current plan (requires %s, %s)", model, planDisplayName(required), required)
+		message = fmt.Sprintf("commandcode-go: model %q is not available on the current plan (requires %s, %s)", resolved, planDisplayName(required), required)
 	}
 	return codedErrorEnvelope(http.StatusForbidden, "model_not_in_plan", message)
 }

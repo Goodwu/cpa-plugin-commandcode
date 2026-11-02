@@ -15,6 +15,7 @@
 - （暂无）
 
 ## Recently Done（最近完成，最多 5-10 条）
+- [x] critical review 修复（M1-M3/m1-m4）并部署0.2.6：开关关闭跳过 billing 探测且列表不过滤；未知 minimumPlan 按CLI链回退内嵌目录快照（从cli.mjs提取106条gating入catalog.json）再回退类别；订阅仅 active/trialing/past_due 参与门控；锁定裸名末段匹配拦截；lockedPlan 改存判定原因（类别门槛premium→Pro）；测试 pin cli_version+唯一key消除新增race入口；README 收窄TTL懒刷新/开关/错误码措辞。生产0.2.6验证列表与0.2.5一致、锁定仍过滤、推理正常；vet/test/race(-count=1)与reviewer指定组合通过
 - [x] 按订阅套餐过滤锁定模型并部署0.2.5：目录改读 /provider/v1/models?view=client（含 category/minimumPlan），按 CLI 1.88.2 evaluateModelAccess 规则（套餐等级+类别+credits 全解锁+降级不锁）从模型列表剔除锁定模型并在执行器侧 403 model_not_in_plan 拦截；filter_locked_models 可关。生产验证 Go 套餐下 9 个锁定模型（grok-4.6/4.7、Qwen3.8-Max-Prime、muse-* 等）从 /v1/models 消失、新增 7 个 client view 可用模型、流式/Anthropic/非流式推理与锁定请求拒绝均正常；vet/test/race/build 全绿
 - [x] 按要求整体删除独立状态页、侧栏入口及诊断接口，部署0.2.4；浏览器确认入口消失、旧公共地址404、统一额度刷新正常，vet/test/race/build通过
 - [x] 统一5小时/每周/月度额度文案并移除月度分隔线；补GOAT和两类Pro分母回归，明确静态CLI套餐表来源与非Go真实验证缺口；前端检查通过并部署

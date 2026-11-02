@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 )
 
 // stubHTTPFor intercepts host.http.do and routes by URL suffix.
@@ -87,23 +88,71 @@ func TestFetchRemoteModelsFallsBackToPlainView(t *testing.T) {
 }
 
 func TestFetchPlanContext(t *testing.T) {
+	// Pin the CLI version so currentCLIVersion never spawns the background
+	// npm lookup (it races with tests that stub version internals).
+	setPluginConfig([]byte("cli_version: 1.88.2\n"))
+	defer setPluginConfig(nil)
+
+	// Unique per-run key: getPlan caches by auth+key hash for 5 minutes, and a
+	// stale cache hit would skip the subscriptions branch under -count>1.
+	uniq := fmt.Sprintf("-%d", time.Now().UnixNano())
+
 	creditsOK := func(msg hostHTTPRequestMsg) hostHTTPResponse {
 		return hostHTTPResponse{StatusCode: 200, Body: []byte(`{"credits":{"purchasedCredits":0,"freeCredits":0,"monthlyCredits":5}}`)}
 	}
-	subscription := func(planID string) func(hostHTTPRequestMsg) hostHTTPResponse {
+	subscription := func(planID, status string) func(hostHTTPRequestMsg) hostHTTPResponse {
 		return func(hostHTTPRequestMsg) hostHTTPResponse {
-			return hostHTTPResponse{StatusCode: 200, Body: []byte(fmt.Sprintf(`{"success":true,"data":{"planId":%q,"status":"active"}}`, planID))}
+			return hostHTTPResponse{StatusCode: 200, Body: []byte(fmt.Sprintf(`{"success":true,"data":{"planId":%q,"status":%q}}`, planID, status))}
 		}
 	}
 
-	t.Run("known plan filters", func(t *testing.T) {
+	t.Run("known live plan filters", func(t *testing.T) {
 		stubHTTPFor(t, map[string]func(hostHTTPRequestMsg) hostHTTPResponse{
-			"billing/credits":        creditsOK,
-			"billing/subscriptions":  subscription("individual-go-v1"),
+			"billing/credits":       creditsOK,
+			"billing/subscriptions": subscription("individual-go-v1", "active"),
 		})
-		ctx := fetchPlanContext("cb", "https://api.example", "key-filter-ok", "auth-1")
+		ctx := fetchPlanContext("cb", "https://api.example", "key-filter-ok"+uniq, "auth-1"+uniq)
 		if !ctx.filter || ctx.planID != "individual-go-v1" || ctx.creditsUnlock {
 			t.Fatalf("ctx = %+v, want filter for individual-go-v1 without credits", ctx)
+		}
+	})
+
+	t.Run("trialing and past_due still filter", func(t *testing.T) {
+		for i, status := range []string{"trialing", "past_due"} {
+			stubHTTPFor(t, map[string]func(hostHTTPRequestMsg) hostHTTPResponse{
+				"billing/credits":       creditsOK,
+				"billing/subscriptions": subscription("individual-pro", status),
+			})
+			ctx := fetchPlanContext("cb", "https://api.example", fmt.Sprintf("key-%s%d%s", status, i, uniq), fmt.Sprintf("auth-%s%d%s", status, i, uniq))
+			if !ctx.filter || ctx.planID != "individual-pro" {
+				t.Fatalf("status %s: ctx = %+v, want filtering", status, ctx)
+			}
+		}
+	})
+
+	t.Run("canceled subscription disables filtering", func(t *testing.T) {
+		stubHTTPFor(t, map[string]func(hostHTTPRequestMsg) hostHTTPResponse{
+			"billing/credits":       creditsOK,
+			"billing/subscriptions": subscription("individual-go-v1", "canceled"),
+		})
+		ctx := fetchPlanContext("cb", "https://api.example", "key-canceled"+uniq, "auth-canceled"+uniq)
+		if ctx.filter {
+			t.Fatalf("ctx = %+v, want no filtering for canceled subscription", ctx)
+		}
+	})
+
+	t.Run("switch off skips billing entirely", func(t *testing.T) {
+		defer setPluginConfig([]byte("cli_version: 1.88.2\n"))
+		setPluginConfig([]byte("cli_version: 1.88.2\nfilter_locked_models: false\n"))
+		stubHTTPFor(t, map[string]func(hostHTTPRequestMsg) hostHTTPResponse{
+			"billing/credits": func(hostHTTPRequestMsg) hostHTTPResponse {
+				t.Fatal("billing must not be probed when the filter is off")
+				return hostHTTPResponse{}
+			},
+		})
+		ctx := fetchPlanContext("cb", "https://api.example", "key-off"+uniq, "auth-off"+uniq)
+		if ctx.filter {
+			t.Fatalf("ctx = %+v, want no filtering when switched off", ctx)
 		}
 	})
 
@@ -112,9 +161,9 @@ func TestFetchPlanContext(t *testing.T) {
 			"billing/credits": func(hostHTTPRequestMsg) hostHTTPResponse {
 				return hostHTTPResponse{StatusCode: 200, Body: []byte(`{"credits":{"purchasedCredits":2.5,"freeCredits":0}}`)}
 			},
-			"billing/subscriptions": subscription("individual-go-v1"),
+			"billing/subscriptions": subscription("individual-go-v1", "active"),
 		})
-		ctx := fetchPlanContext("cb", "https://api.example", "key-credits", "auth-2")
+		ctx := fetchPlanContext("cb", "https://api.example", "key-credits"+uniq, "auth-2"+uniq)
 		if !ctx.filter || !ctx.creditsUnlock {
 			t.Fatalf("ctx = %+v, want creditsUnlock", ctx)
 		}
@@ -126,7 +175,7 @@ func TestFetchPlanContext(t *testing.T) {
 				return hostHTTPResponse{StatusCode: 401, Body: []byte(`{"error":"denied"}`)}
 			},
 		})
-		ctx := fetchPlanContext("cb", "https://api.example", "key-401", "auth-3")
+		ctx := fetchPlanContext("cb", "https://api.example", "key-401"+uniq, "auth-3"+uniq)
 		if ctx.filter {
 			t.Fatalf("ctx = %+v, want no filtering on billing failure", ctx)
 		}
@@ -135,9 +184,9 @@ func TestFetchPlanContext(t *testing.T) {
 	t.Run("unknown plan disables filtering", func(t *testing.T) {
 		stubHTTPFor(t, map[string]func(hostHTTPRequestMsg) hostHTTPResponse{
 			"billing/credits":       creditsOK,
-			"billing/subscriptions": subscription("enterprise-mystery"),
+			"billing/subscriptions": subscription("enterprise-mystery", "active"),
 		})
-		ctx := fetchPlanContext("cb", "https://api.example", "key-unknown-plan", "auth-4")
+		ctx := fetchPlanContext("cb", "https://api.example", "key-unknown-plan"+uniq, "auth-4"+uniq)
 		if ctx.filter {
 			t.Fatalf("ctx = %+v, want no filtering for unknown plan", ctx)
 		}

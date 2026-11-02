@@ -1,5 +1,10 @@
 {
-  "closedModelOrgs": ["anthropic", "openai", "google", "gemini"],
+  "closedModelOrgs": [
+    "anthropic",
+    "openai",
+    "google",
+    "gemini"
+  ],
   "builtin": [
     "deepseek/deepseek-v4-pro",
     "deepseek/deepseek-v4-flash",
@@ -219,14 +224,40 @@
     "poolside/laguna-s-2.1-free": "Laguna S 2.1 (Free)"
   },
   "reasoningEfforts": {
-    "deepseek/deepseek-v4-pro": ["high", "max"],
-    "deepseek/deepseek-v4-flash": ["high", "max"],
-    "deepseek/deepseek-v4-flash-vision-exp": ["high", "max"],
-    "zai-org/GLM-5.3": ["high", "max"],
-    "z-ai/glm-5.3-flash": ["high", "max"],
-    "zai-org/GLM-5.2": ["high", "max"],
-    "xai/grok-4.6": ["low", "medium", "high"],
-    "xai/grok-4.5": ["low", "medium", "high"]
+    "deepseek/deepseek-v4-pro": [
+      "high",
+      "max"
+    ],
+    "deepseek/deepseek-v4-flash": [
+      "high",
+      "max"
+    ],
+    "deepseek/deepseek-v4-flash-vision-exp": [
+      "high",
+      "max"
+    ],
+    "zai-org/GLM-5.3": [
+      "high",
+      "max"
+    ],
+    "z-ai/glm-5.3-flash": [
+      "high",
+      "max"
+    ],
+    "zai-org/GLM-5.2": [
+      "high",
+      "max"
+    ],
+    "xai/grok-4.6": [
+      "low",
+      "medium",
+      "high"
+    ],
+    "xai/grok-4.5": [
+      "low",
+      "medium",
+      "high"
+    ]
   },
   "maxOutputTokens": {
     "deepseek/deepseek-v4-pro": 393216,
@@ -243,5 +274,431 @@
     "xiaomi/mimo-v2.5": 131072,
     "Qwen/Qwen3.7-Max": 65536,
     "Qwen/Qwen3.7-Plus": 65536
+  },
+  "embeddedGating": {
+    "minimaxai/minimax-m2.5": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "minimaxai/minimax-m2.7": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "minimaxai/minimax-m3": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "minimaxai/minimax-m3-free": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "qwen/qwen3.6-max-preview": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "qwen/qwen3.6-plus": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "qwen/qwen3.7-flash": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "qwen/qwen3.7-max": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "qwen/qwen3.7-plus": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "qwen/qwen3.8-27b": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "qwen/qwen3.8-flash": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "qwen/qwen3.8-max": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "qwen/qwen3.8-max-0902": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "qwen/qwen3.8-max-prime": {
+      "category": "opensource",
+      "minimumPlan": "individual-goat"
+    },
+    "qwen/qwen3.8-omni-flash": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "claude-fable-5": {
+      "category": "premium",
+      "minimumPlan": "individual-provider"
+    },
+    "claude-fable-5-1": {
+      "category": "premium",
+      "minimumPlan": "individual-provider"
+    },
+    "claude-haiku-4-5-20251001": {
+      "category": "premium",
+      "minimumPlan": "individual-pro"
+    },
+    "claude-haiku-5-5": {
+      "category": "opensource",
+      "minimumPlan": "individual-goat"
+    },
+    "claude-opus-4-7": {
+      "category": "premium",
+      "minimumPlan": "individual-provider"
+    },
+    "claude-opus-4-8": {
+      "category": "premium",
+      "minimumPlan": "individual-provider"
+    },
+    "claude-opus-5": {
+      "category": "premium",
+      "minimumPlan": "individual-provider"
+    },
+    "claude-opus-5-5": {
+      "category": "premium",
+      "minimumPlan": "individual-provider"
+    },
+    "claude-sonnet-4-6": {
+      "category": "premium",
+      "minimumPlan": "individual-pro"
+    },
+    "claude-sonnet-5": {
+      "category": "premium",
+      "minimumPlan": "individual-pro"
+    },
+    "claude-sonnet-5-5": {
+      "category": "opensource",
+      "minimumPlan": "individual-goat"
+    },
+    "deepseek/deepseek-v4-flash": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "deepseek/deepseek-v4-flash-fast": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "deepseek/deepseek-v4-flash-vision-exp": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "deepseek/deepseek-v4-pro": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "deepseek/deepseek-v4.1-flash": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "deepseek/deepseek-v4.1-flash-fast": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "google/gemini-3.1-flash-lite": {
+      "category": "premium",
+      "minimumPlan": "individual-pro"
+    },
+    "google/gemini-3.5-flash": {
+      "category": "premium",
+      "minimumPlan": "individual-pro"
+    },
+    "google/gemini-3.5-flash-lite": {
+      "category": "premium",
+      "minimumPlan": "individual-pro"
+    },
+    "google/gemini-3.6-flash": {
+      "category": "premium",
+      "minimumPlan": "individual-pro"
+    },
+    "google/gemini-3.7-flash": {
+      "category": "opensource",
+      "minimumPlan": "individual-goat"
+    },
+    "google/gemini-3.8-flash": {
+      "category": "opensource",
+      "minimumPlan": "individual-goat"
+    },
+    "google/gemini-4-argon": {
+      "category": "premium",
+      "minimumPlan": "individual-pro"
+    },
+    "gpt-5.3-codex": {
+      "category": "premium",
+      "minimumPlan": "individual-pro"
+    },
+    "gpt-5.4": {
+      "category": "premium",
+      "minimumPlan": "individual-pro"
+    },
+    "gpt-5.4-mini": {
+      "category": "premium",
+      "minimumPlan": "individual-pro"
+    },
+    "gpt-5.5": {
+      "category": "premium",
+      "minimumPlan": "individual-pro"
+    },
+    "gpt-5.6-luna": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "gpt-5.6-sol": {
+      "category": "opensource",
+      "minimumPlan": "individual-goat"
+    },
+    "gpt-5.6-terra": {
+      "category": "premium",
+      "minimumPlan": "individual-pro"
+    },
+    "gpt-6-astra": {
+      "category": "premium",
+      "minimumPlan": "individual-provider"
+    },
+    "gpt-6-luna": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "gpt-6-sol": {
+      "category": "premium",
+      "minimumPlan": "individual-pro"
+    },
+    "gpt-6.1-sol": {
+      "category": "premium",
+      "minimumPlan": "individual-max"
+    },
+    "gpt-6.1-terra": {
+      "category": "premium",
+      "minimumPlan": "individual-pro"
+    },
+    "inclusionai/ling-3.1-flash": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "inclusionai/ling-3.1-flash:free": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "meituan/longcat-2.0": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "meituan/longcat-2.0:free": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "meta/muse-spark-1.1": {
+      "category": "premium",
+      "minimumPlan": "individual-pro"
+    },
+    "meta/muse-spark-1.2": {
+      "category": "opensource",
+      "minimumPlan": "individual-goat"
+    },
+    "meta/muse-spark-1.2-contributor": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "meta/muse-spark-1.3": {
+      "category": "opensource",
+      "minimumPlan": "individual-goat"
+    },
+    "meta/muse-spark-1.3-contributor": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "meta/muse-spark-open": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "meta/muse-wonder-1.0": {
+      "category": "premium",
+      "minimumPlan": "individual-max"
+    },
+    "minimax/minimax-m2.7-free": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "minimax/minimax-m3-free": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "minimax/minimax-m3.1-flash": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "minimax/minimax-m3.1-flash:free": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "mistral/mistral-large-4": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "moonshotai/kimi-k2.5": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "moonshotai/kimi-k2.6": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "moonshotai/kimi-k2.7-code": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "moonshotai/kimi-k2.7-code-highspeed": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "moonshotai/kimi-k3": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "moonshotai/kimi-k3.1-pro": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "nvidia/nemotron-3-ultra-550b-a55b": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "nvidia/nemotron-3.5-super-vl": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "ornith/ornith-1.5-122b": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "ornith/ornith-1.5-122b:free": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "poolside/laguna-s-2.1-free": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "reflection/beam:free": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "sakana/fugu-ultra": {
+      "category": "premium",
+      "minimumPlan": "individual-provider"
+    },
+    "stealth/glyph-cluster:free": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "stealth/pixel-canary": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "stealth/space-bunny-alpha": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "stepfun/step-3.5-flash": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "stepfun/step-3.7-flash": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "stepfun/step-5-preview": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "tencent/hy3": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "tencent/hy3-paid": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "tencent/hy4-preview": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "thinkingmachines/inkling": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "thinkingmachines/inkling-small": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "xai/grok-4.5": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "xai/grok-4.6": {
+      "category": "opensource",
+      "minimumPlan": "individual-goat"
+    },
+    "xai/grok-4.7": {
+      "category": "opensource",
+      "minimumPlan": "individual-goat"
+    },
+    "xiaomi/mimo-v2.5": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "xiaomi/mimo-v2.5-pro": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "xiaomi/mimo-v2.6-flash": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "xiaomi/mimo-v2.6-pro": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "xiaomi/mimo-v2.6-pro-ultraspeed": {
+      "category": "opensource",
+      "minimumPlan": "individual-goat"
+    },
+    "z-ai/glm-5.3-flash": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "z-ai/glm-5.3-flashx": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "zai-org/glm-5": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "zai-org/glm-5.1": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "zai-org/glm-5.2": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "zai-org/glm-5.2-fast": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    },
+    "zai-org/glm-5.3": {
+      "category": "opensource",
+      "minimumPlan": "individual-go"
+    }
   }
 }

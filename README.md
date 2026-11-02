@@ -101,7 +101,7 @@ Claude Code / Codex / 任意 OpenAI 兼容客户端按 CPA 常规方式接即可
 
 ## 行为说明
 
-- **按套餐过滤锁定模型**：上游按订阅套餐对每个模型标记可用性（官方 CLI 语义：`minimumPlan` 等级比较 + `opensource`/`premium` 类别）。插件在刷新模型目录时读取 `/provider/v1/models?view=client` 的 gating 字段，并用 billing 的套餐与 credits 状态评估：不可用的模型从 `/v1/models` 列表移除；直接点名锁定模型的请求在插件侧直接返回 403 `model_not_in_plan`（含所需最低套餐），不发往上游。判定规则与 CLI 1.88.2 一致：购买/免费 credits > 0 时全部解锁；billing 不可达、套餐未知或目录无 gating 信息时不锁定（保持全量列表）；目录刷新节奏跟随远端 `refreshAfterSeconds`（5 分钟~1 小时钳制），套餐变更最迟一个刷新周期后生效。`filter_locked_models: false` 可整体关闭。多凭证场景按最近一次目录刷新所用凭证的套餐过滤。
+- **按套餐过滤锁定模型**：上游按订阅套餐对每个模型标记可用性（官方 CLI 语义：`minimumPlan` 等级比较，未知等级回退 CLI 内嵌目录快照，再回退 `opensource`/`premium` 类别判定）。插件在刷新模型目录时读取 `/provider/v1/models?view=client` 的 gating 字段，并用 billing 的套餐与 credits 状态评估：不可用的模型从 `/v1/models` 列表移除；直接点名锁定模型（含与锁定 id 末段相同的裸名）的请求在插件侧拒绝，返回 HTTP 403（插件内部错误码 `model_not_in_plan`；客户端实际看到的 JSON 结构取决于宿主透传，HTTP 状态与错误消息保留），消息注明所需最低套餐，不发往上游。判定规则与 CLI 1.88.2 对齐：购买/免费 credits > 0 时全部解锁；billing 不可达、订阅非 active/trialing/past_due、套餐未知或目录无 gating 信息时不锁定（保持全量列表）。目录刷新为**懒刷新**：TTL 跟随远端 `refreshAfterSeconds`（5 分钟~1 小时钳制），过期后由宿主的下一次模型发现调用触发，无后台定时器；目录刷新持续失败时沿用上次快照。`filter_locked_models: false` 关闭锁定过滤（跳过 billing 探测、列表不过滤、不拦截，客户端 view 数据源与 TTL 行为保留）。多凭证场景按最近一次目录刷新所用凭证的套餐过滤。
 - **上游恒为流式**：非流式请求由插件聚合 CC 事件后返回完整响应（OpenAI `chat.completion` / Anthropic message）。
 - **Anthropic 原生输出**：宿主没有注册 chat-completions→anthropic 的**流式** transformer，插件因此声明 `anthropic` 输出格式并为 Claude 客户端直接产出原生 SSE 事件（`message_start`/`content_block_*`/`message_delta`/`message_stop`，thinking 用 `thinking_delta`、工具用 `input_json_delta`、usage 按 message_start/message_delta 拆分）。
 - **异步流泵**：`executor.execute_stream` 打开上游（同步，保留流前错误的 HTTP 状态语义）后立即返回，chunk 在后台 goroutine 经 `host.stream.emit` 推送——宿主 stream bridge 队列仅 16，在 RPC 内同步泵会在长流上死锁。

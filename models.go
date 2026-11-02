@@ -85,16 +85,26 @@ func handleModelsForAuth(request []byte) ([]byte, error) {
 }
 
 // fetchPlanContext builds the lock-evaluation snapshot from the billing
-// endpoints the CLI itself uses. It only enables filtering when both calls
-// succeed and the subscription names a known plan — mirroring the CLI, which
-// leaves every model selectable when its billing context is missing.
+// endpoints the CLI itself uses. It only enables filtering when the switch is
+// on, both calls succeed, and the subscription is live (active/trialing/
+// past_due, the only statuses the CLI honors a planId from) and names a known
+// plan — mirroring the CLI, which leaves every model selectable when its
+// billing context is missing or not in good standing.
 func fetchPlanContext(callbackID, apiBase, apiKey, authID string) planContext {
+	if !activeConfig().FilterLockedModels {
+		return planContext{} // switch off: skip billing entirely, never lock
+	}
 	cliVersion := currentCLIVersion(callbackID)
 	credits, status, errCredits := getCredits(callbackID, apiBase, apiKey, cliVersion)
 	if errCredits != nil || status != http.StatusOK || credits == nil {
 		return planContext{}
 	}
 	plan := getPlan(callbackID, apiBase, apiKey, cliVersion, authID)
+	switch plan.status {
+	case "active", "trialing", "past_due":
+	default:
+		return planContext{}
+	}
 	if _, known := planRanks[plan.planID]; !known {
 		return planContext{}
 	}

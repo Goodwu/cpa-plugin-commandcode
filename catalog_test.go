@@ -104,29 +104,39 @@ func TestEvaluateModelAccessMatrix(t *testing.T) {
 	goPlan := planContext{filter: true, planID: "individual-go-v1"}
 	proPlan := planContext{filter: true, planID: "individual-pro"}
 	cases := []struct {
-		name        string
-		category    string
-		minimumPlan planRef
-		ctx         planContext
-		want        bool
+		name         string
+		id           string
+		category     string
+		minimumPlan  planRef
+		ctx          planContext
+		wantAllowed  bool
+		wantRequired string
 	}{
-		{"no billing context stays open", "premium", planRefFor("individual-provider"), planContext{}, true},
-		{"credits unlock everything", "premium", planRefFor("individual-provider"), planContext{filter: true, planID: "individual-go-v1", creditsUnlock: true}, true},
-		{"uncatalogued model stays open", "", planRef{}, goPlan, true},
-		{"floor plan is allowed", "opensource", planRefFor("individual-go"), goPlan, true},
-		{"higher tier locks", "opensource", planRefFor("individual-goat"), goPlan, false},
-		{"top tier allows everything", "premium", planRefFor("individual-ultra"), planContext{filter: true, planID: "individual-ultra"}, true},
-		{"pro outranks goat gate", "premium", planRefFor("individual-goat"), proPlan, true},
-		{"null minimumPlan locks all", "opensource", planRef{set: true, null: true}, proPlan, false},
-		{"category fallback locks premium on go", "premium", planRef{}, goPlan, false},
-		{"category fallback allows opensource on go", "opensource", planRef{}, goPlan, true},
-		{"category fallback allows premium on pro", "premium", planRef{}, proPlan, true},
-		{"unknown minimum plan id falls back to category", "premium", planRefFor("enterprise-custom"), goPlan, false},
-		{"unknown minimum plan id, allowed category", "opensource", planRefFor("enterprise-custom"), goPlan, true},
+		{"no billing context stays open", "m", "premium", planRefFor("individual-provider"), planContext{}, true, ""},
+		{"credits unlock everything", "m", "premium", planRefFor("individual-provider"), planContext{filter: true, planID: "individual-go-v1", creditsUnlock: true}, true, ""},
+		{"uncatalogued model stays open", "m", "", planRef{}, goPlan, true, ""},
+		{"unknown category never gates", "m", "internal-preview", planRefFor("individual-goat"), goPlan, true, ""},
+		{"floor plan is allowed", "m", "opensource", planRefFor("individual-go"), goPlan, true, "individual-go"},
+		{"higher tier locks", "m", "opensource", planRefFor("individual-goat"), goPlan, false, "individual-goat"},
+		{"top tier allows everything", "m", "premium", planRefFor("individual-ultra"), planContext{filter: true, planID: "individual-ultra"}, true, "individual-ultra"},
+		{"pro outranks goat gate", "m", "premium", planRefFor("individual-goat"), proPlan, true, "individual-goat"},
+		{"null minimumPlan locks all, no tier satisfies", "m", "opensource", planRef{set: true, null: true}, proPlan, false, ""},
+		{"category fallback locks premium on go, names Pro", "m", "premium", planRef{}, goPlan, false, "individual-pro"},
+		{"category fallback allows opensource on go", "m", "opensource", planRef{}, goPlan, true, "individual-go"},
+		{"category fallback allows premium on pro", "m", "premium", planRef{}, proPlan, true, "individual-pro"},
+		// CLI chain rankedAccess → embeddedAccess → categoryAccess: an unknown
+		// tier value consults the embedded snapshot (xai/grok-4.6 = goat there)
+		// before category gating — the reviewer's counterexample.
+		{"unknown tier falls back to embedded goat gate", "xai/grok-4.6", "opensource", planRefFor("future-plan"), goPlan, false, "individual-goat"},
+		{"unknown tier not in embedded falls to category", "vendor/brand-new", "premium", planRefFor("future-plan"), goPlan, false, "individual-pro"},
+		{"unknown tier, embedded category disagrees", "xai/grok-4.6", "premium", planRefFor("future-plan"), goPlan, false, "individual-pro"},
+		{"unknown tier, allowed category", "vendor/brand-new", "opensource", planRefFor("enterprise-custom"), goPlan, true, "individual-go"},
 	}
 	for _, tc := range cases {
-		if got := evaluateModelAccess(tc.category, tc.minimumPlan, tc.ctx); got != tc.want {
-			t.Fatalf("%s: evaluateModelAccess(%q, %+v, %+v) = %v, want %v", tc.name, tc.category, tc.minimumPlan, tc.ctx, got, tc.want)
+		gotAllowed, gotRequired := evaluateModelAccess(tc.id, tc.category, tc.minimumPlan, tc.ctx)
+		if gotAllowed != tc.wantAllowed || gotRequired != tc.wantRequired {
+			t.Fatalf("%s: evaluateModelAccess(%q, %q, %+v, %+v) = (%v, %q), want (%v, %q)",
+				tc.name, tc.id, tc.category, tc.minimumPlan, tc.ctx, gotAllowed, gotRequired, tc.wantAllowed, tc.wantRequired)
 		}
 	}
 }
@@ -170,11 +180,23 @@ func TestApplyRemoteCatalogLocksModelsByPlan(t *testing.T) {
 	if required, locked := modelLockReason("vendor/gated-model"); !locked || required != "individual-goat" {
 		t.Fatalf("lock reason = %q %v, want individual-goat true", required, locked)
 	}
+	if required, locked := modelLockReason("vendor/premium-model"); !locked || required != "individual-pro" {
+		t.Fatalf("category lock must name the category floor Pro, got %q %v", required, locked)
+	}
+	if required, locked := modelLockReason("vendor/null-model"); !locked || required != "" {
+		t.Fatalf("null lock has no satisfiable tier, got %q %v", required, locked)
+	}
 	if _, locked := modelLockReason("vendor/open-model"); locked {
 		t.Fatal("allowed model must not report locked")
 	}
 	if isModelLocked("vendor/premium-model") != true {
 		t.Fatal("category-locked model must report locked")
+	}
+	if _, locked := lockedBareNameReason("gated-model"); !locked {
+		t.Fatal("bare name of a locked model must match the lock set")
+	}
+	if _, locked := lockedBareNameReason("open-model"); locked {
+		t.Fatal("bare name of an allowed model must not match")
 	}
 	// Bare-name resolution must skip locked entries and fall through.
 	if got := resolveModel("gated-model"); got != "gated-model" {

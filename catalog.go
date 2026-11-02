@@ -18,13 +18,23 @@ import (
 var catalogJSON []byte
 
 type catalogData struct {
-	ClosedModelOrgs  []string            `json:"closedModelOrgs"`
-	Builtin          []string            `json:"builtin"`
-	ShortAliases     map[string]string   `json:"shortAliases"`
-	ContextWindows   map[string]int64    `json:"contextWindows"`
-	ModelNames       map[string]string   `json:"modelNames"`
-	ReasoningEfforts map[string][]string `json:"reasoningEfforts"`
-	MaxOutputTokens  map[string]int64    `json:"maxOutputTokens"`
+	ClosedModelOrgs  []string                     `json:"closedModelOrgs"`
+	Builtin          []string                     `json:"builtin"`
+	ShortAliases     map[string]string            `json:"shortAliases"`
+	ContextWindows   map[string]int64             `json:"contextWindows"`
+	ModelNames       map[string]string            `json:"modelNames"`
+	ReasoningEfforts map[string][]string          `json:"reasoningEfforts"`
+	MaxOutputTokens  map[string]int64             `json:"maxOutputTokens"`
+	EmbeddedGating   map[string]embeddedGate      `json:"embeddedGating"`
+}
+
+// embeddedGate is one entry of the CLI-bundled catalog snapshot (the payload
+// behind the CLI's getEmbeddedModelCatalog, extracted from command-code
+// 1.88.2's cli.mjs). The CLI consults it when a remote minimumPlan names an
+// unknown tier (rankedAccess → embeddedAccess → categoryAccess).
+type embeddedGate struct {
+	Category    string `json:"category"`
+	MinimumPlan string `json:"minimumPlan"`
 }
 
 // effortRank orders effort levels low -> max; unknown values rank as medium so
@@ -40,12 +50,19 @@ func rankEffort(effort string) int {
 
 var staticCatalog catalogData
 
+// embeddedGates indexes staticCatalog.EmbeddedGating by lowercased id.
+var embeddedGates map[string]embeddedGate
+
 // init, not a var initializer: the initializer for currentCat would run
 // before this unmarshal and bake in an empty catalog.
 func init() {
 	_ = json.Unmarshal(catalogJSON, &staticCatalog)
 	if staticCatalog.Builtin == nil {
 		staticCatalog.Builtin = []string{}
+	}
+	embeddedGates = make(map[string]embeddedGate, len(staticCatalog.EmbeddedGating))
+	for id, gate := range staticCatalog.EmbeddedGating {
+		embeddedGates[strings.ToLower(id)] = gate
 	}
 	currentCat = buildStaticCatalog()
 	staticOrgSet = buildOrgSet()
@@ -180,25 +197,53 @@ type planContext struct {
 	creditsUnlock bool // purchased or free credits present: everything unlocks
 }
 
-// evaluateModelAccess mirrors the CLI: credits unlock all models, unknown
-// plans and uncatalogued models pass, minimumPlan ranks gate, and category is
-// the fallback when minimumPlan is absent or names an unknown tier. Callers
-// only set filter for a known planID, so the rank lookup below always hits.
-func evaluateModelAccess(category string, minimumPlan planRef, planCtx planContext) bool {
+// evaluateModelAccess mirrors the CLI's chain (rankedAccess → embeddedAccess
+// → categoryAccess): credits unlock everything, unknown plans and uncatalogued
+// models pass, a known minimumPlan rank gates, an unknown tier value consults
+// the CLI-embedded snapshot (whose category must agree), and category gating
+// is the final fallback. Only opensource/premium gate — any other category
+// value carries no gating signal, exactly like the CLI's knownCategory.
+//
+// The second return is the plan id a lock message should name ("" when no
+// tier satisfies the gate, e.g. an explicit null minimumPlan). Callers only
+// set filter with a known planID, so the rank lookups below always hit.
+func evaluateModelAccess(id, category string, minimumPlan planRef, planCtx planContext) (bool, string) {
 	if !planCtx.filter || planCtx.creditsUnlock {
-		return true
+		return true, ""
 	}
-	if category == "" {
-		return true // not in the client catalog: upstream remains the judge
+	if category != "opensource" && category != "premium" {
+		return true, "" // CLI knownCategory: unknown category never gates
 	}
-	if minimumPlan.set && !minimumPlan.null {
-		if required, known := planRanks[minimumPlan.value]; known {
-			return planRanks[planCtx.planID] >= required
+	if !minimumPlan.set {
+		return allowByCategory(category, planCtx)
+	}
+	if minimumPlan.null {
+		return false, "" // catalog explicitly locks it for every plan
+	}
+	if required, known := planRanks[minimumPlan.value]; known {
+		return planRanks[planCtx.planID] >= required, minimumPlan.value
+	}
+	// Unknown tier value: the CLI retries against its embedded catalog
+	// snapshot (only when the categories agree) before category gating.
+	if gate, ok := embeddedGates[strings.ToLower(id)]; ok && gate.Category == category && gate.MinimumPlan != "" {
+		if required, known := planRanks[gate.MinimumPlan]; known {
+			return planRanks[planCtx.planID] >= required, gate.MinimumPlan
 		}
-	} else if minimumPlan.null {
-		return false // catalog explicitly locks it for every plan
 	}
-	return planAllowsCategory(planCtx.planID, category)
+	return allowByCategory(category, planCtx)
+}
+
+func allowByCategory(category string, planCtx planContext) (bool, string) {
+	return planAllowsCategory(planCtx.planID, category), categoryMinimumPlan(category)
+}
+
+// categoryMinimumPlan mirrors the CLI's getMinimumPlanForModel: the lowest
+// tier (in rank order) whose allowed categories include the model's category.
+func categoryMinimumPlan(category string) string {
+	if category == "premium" {
+		return "individual-pro"
+	}
+	return "individual-go"
 }
 
 // catalogIDs returns the active catalog ids (static order first), skipping
@@ -235,6 +280,24 @@ func modelLockReason(id string) (string, bool) {
 func isModelLocked(id string) bool {
 	_, locked := modelLockReason(id)
 	return locked
+}
+
+// lockedBareNameReason matches a bare (org-less) name against locked ids'
+// last segments the way resolveModel matches catalog entries. resolveModel
+// only resolves bare names against the filtered list, so a bare name equal
+// to a locked model's last segment would otherwise slip past the lock check.
+func lockedBareNameReason(name string) (string, bool) {
+	catalogMu.RLock()
+	defer catalogMu.RUnlock()
+	if len(currentCat.locked) == 0 {
+		return "", false
+	}
+	for key := range currentCat.locked {
+		if strings.EqualFold(key[strings.LastIndex(key, "/")+1:], name) {
+			return currentCat.lockedPlan[key], true
+		}
+	}
+	return "", false
 }
 
 // applyRemoteCatalog merges the provider API list over the static catalog:
@@ -282,13 +345,13 @@ func applyRemoteCatalog(remote []remoteModel, planCtx planContext, refreshAfterS
 			if model.Category == "" {
 				continue
 			}
-			if evaluateModelAccess(model.Category, model.MinimumPlan, planCtx) {
-				continue
-			}
-			key := strings.ToLower(model.ID)
-			locked[key] = struct{}{}
-			if model.MinimumPlan.set && !model.MinimumPlan.null {
-				lockedPlan[key] = model.MinimumPlan.value
+			// lockedPlan records the tier the *decision* hinged on (rank,
+			// embedded snapshot, or category floor), not the raw field, so a
+			// lock message never names a plan that would not actually unlock.
+			if allowed, required := evaluateModelAccess(model.ID, model.Category, model.MinimumPlan, planCtx); !allowed {
+				key := strings.ToLower(model.ID)
+				locked[key] = struct{}{}
+				lockedPlan[key] = required
 			}
 		}
 		if len(locked) == 0 {

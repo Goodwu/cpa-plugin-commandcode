@@ -128,6 +128,18 @@ func TestLockedModelEnvelope(t *testing.T) {
 		t.Fatalf("message should name the required plan, got %q", parsed.Error.Message)
 	}
 
+	// A bare name equal to a locked id's last segment must also be rejected.
+	bare := lockedModelEnvelope("gated-model")
+	if bare == nil {
+		t.Fatal("bare name of a locked model must be rejected")
+	}
+	if err := json.Unmarshal(bare, &parsed); err != nil || parsed.Error == nil {
+		t.Fatalf("bare-name rejection envelope: %v %s", err, bare)
+	}
+	if !strings.Contains(parsed.Error.Message, "GOAT") {
+		t.Fatalf("bare-name message should name the required plan, got %q", parsed.Error.Message)
+	}
+
 	if env := lockedModelEnvelope("vendor/other-model"); env != nil {
 		t.Fatalf("unlocked model must pass, got %s", env)
 	}
@@ -162,6 +174,41 @@ func TestHandleExecuteRejectsLockedModel(t *testing.T) {
 	response, errRPC := handleExecute(request)
 	if errRPC != nil {
 		t.Fatalf("handleExecute rpc error: %v", errRPC)
+	}
+	var parsed envelope
+	if err := json.Unmarshal(response, &parsed); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if parsed.OK || parsed.Error == nil || parsed.Error.Code != "model_not_in_plan" || parsed.Error.HTTPStatus != http.StatusForbidden {
+		t.Fatalf("expected 403 model_not_in_plan envelope, got %s", response)
+	}
+}
+
+func TestHandleExecuteStreamRejectsLockedModel(t *testing.T) {
+	defer resetCatalog()
+	defer setPluginConfig(nil)
+	applyRemoteCatalog([]remoteModel{
+		{ID: "vendor/gated-model", Category: "opensource", MinimumPlan: planRefFor("individual-goat")},
+	}, planContext{filter: true, planID: "individual-go-v1"}, 900)
+
+	oldCall := hostCall
+	defer func() { hostCall = oldCall }()
+	hostCall = func(method string, _ any) (json.RawMessage, error) {
+		t.Fatalf("locked model must not reach the upstream, got host call %s", method)
+		return nil, nil
+	}
+
+	payload, _ := json.Marshal(map[string]any{"model": "vendor/gated-model", "messages": []map[string]any{{"role": "user", "content": "hi"}}, "stream": true})
+	request, _ := json.Marshal(executorRequest{
+		AuthID:         "auth-1",
+		StreamID:       "stream-1",
+		StorageJSON:    []byte(`{"type":"commandcode-go","api_key":"sk-test"}`),
+		Payload:        payload,
+		HostCallbackID: "cb-1",
+	})
+	response, errRPC := handleExecuteStream(request)
+	if errRPC != nil {
+		t.Fatalf("handleExecuteStream rpc error: %v", errRPC)
 	}
 	var parsed envelope
 	if err := json.Unmarshal(response, &parsed); err != nil {
