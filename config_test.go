@@ -74,3 +74,29 @@ func TestCLIVersionPinning(t *testing.T) {
 		t.Fatalf("fallback version: %q", got)
 	}
 }
+
+func TestFilterLockedModelsConfig(t *testing.T) {
+	defer setPluginConfig(nil)
+	if !activeConfig().FilterLockedModels {
+		t.Fatal("filter_locked_models must default to true")
+	}
+	setPluginConfig([]byte("filter_locked_models: false\nmax_retries: 3\n"))
+	if activeConfig().FilterLockedModels {
+		t.Fatal("explicit false must disable filtering")
+	}
+	if activeConfig().MaxRetries != 3 {
+		t.Fatal("other keys must still apply")
+	}
+	setPluginConfig([]byte("filter_locked_models: true\n"))
+	if !activeConfig().FilterLockedModels {
+		t.Fatal("explicit true must enable filtering")
+	}
+	setPluginConfig([]byte("filter_locked_models: maybe\n"))
+	if !activeConfig().FilterLockedModels {
+		t.Fatal("garbage value must keep the default on")
+	}
+	setPluginConfig(nil)
+	if !activeConfig().FilterLockedModels {
+		t.Fatal("defaults must be restored")
+	}
+}

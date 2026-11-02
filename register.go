@@ -52,6 +52,7 @@ func registrationPayload() registrationResponse {
 			{Name: "idle_timeout_ms", Type: "integer", Description: "Max ms between stream chunks; 0 disables (default 120000)."},
 			{Name: "max_retries", Type: "integer", Description: "Upstream retries before the stream starts (default 2)."},
 			{Name: "project_slug", Type: "string", Description: "x-project-slug header value (default derived from the host working directory)."},
+			{Name: "filter_locked_models", Type: "boolean", Description: "Hide and reject models the current subscription plan cannot use, per the client model catalog (default true)."},
 		},
 	}
 	resp.Capabilities.AuthProvider = true

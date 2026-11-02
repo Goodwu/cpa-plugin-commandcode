@@ -22,20 +22,22 @@ const (
 // supported (matching the host's documented config surface), so a line scan
 // avoids a YAML dependency in the module.
 type pluginConfig struct {
-	APIBase      string
-	CLIVersion   string
-	IdleTimeout  time.Duration
-	MaxRetries   int
-	RetryBackoff time.Duration
-	ProjectSlug  string
+	APIBase            string
+	CLIVersion         string
+	IdleTimeout        time.Duration
+	MaxRetries         int
+	RetryBackoff       time.Duration
+	ProjectSlug        string
+	FilterLockedModels bool
 }
 
 func defaultPluginConfig() pluginConfig {
 	return pluginConfig{
-		APIBase:      defaultAPIBase,
-		IdleTimeout:  defaultIdleTimeout,
-		MaxRetries:   defaultMaxRetries,
-		RetryBackoff: time.Duration(defaultRetryBackoffMs) * time.Millisecond,
+		APIBase:            defaultAPIBase,
+		IdleTimeout:        defaultIdleTimeout,
+		MaxRetries:         defaultMaxRetries,
+		RetryBackoff:       time.Duration(defaultRetryBackoffMs) * time.Millisecond,
+		FilterLockedModels: true,
 	}
 }
 
@@ -63,6 +65,9 @@ func setPluginConfig(raw []byte) {
 	}
 	if value := strings.TrimSpace(yamlScalar(raw, "project_slug")); value != "" {
 		cfg.ProjectSlug = value
+	}
+	if value, ok := yamlBool(raw, "filter_locked_models"); ok {
+		cfg.FilterLockedModels = value
 	}
 	configMu.Lock()
 	currentConfig = cfg
@@ -113,4 +118,18 @@ func yamlInt(raw []byte, key string) (int64, bool) {
 		return 0, false
 	}
 	return parsed, true
+}
+
+// yamlBool parses a top-level "key: true|false" line, matching the scalar
+// conventions of yamlScalar/yamlInt (unknown or malformed values fall back to
+// the caller's default).
+func yamlBool(raw []byte, key string) (bool, bool) {
+	value := strings.ToLower(strings.TrimSpace(yamlScalar(raw, key)))
+	switch value {
+	case "true":
+		return true, true
+	case "false":
+		return false, true
+	}
+	return false, false
 }

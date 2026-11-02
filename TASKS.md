@@ -15,6 +15,7 @@
 - （暂无）
 
 ## Recently Done（最近完成，最多 5-10 条）
+- [x] 按订阅套餐过滤锁定模型并部署0.2.5：目录改读 /provider/v1/models?view=client（含 category/minimumPlan），按 CLI 1.88.2 evaluateModelAccess 规则（套餐等级+类别+credits 全解锁+降级不锁）从模型列表剔除锁定模型并在执行器侧 403 model_not_in_plan 拦截；filter_locked_models 可关。生产验证 Go 套餐下 9 个锁定模型（grok-4.6/4.7、Qwen3.8-Max-Prime、muse-* 等）从 /v1/models 消失、新增 7 个 client view 可用模型、流式/Anthropic/非流式推理与锁定请求拒绝均正常；vet/test/race/build 全绿
 - [x] 按要求整体删除独立状态页、侧栏入口及诊断接口，部署0.2.4；浏览器确认入口消失、旧公共地址404、统一额度刷新正常，vet/test/race/build通过
 - [x] 统一5小时/每周/月度额度文案并移除月度分隔线；补GOAT和两类Pro分母回归，明确静态CLI套餐表来源与非Go真实验证缺口；前端检查通过并部署
 - [x] 部署月度文案微调：隐藏重复Monthly credits分组标题，中文月度额度标签；静态渲染确认标题消失、中文及22.7%保留，前端完整检查通过

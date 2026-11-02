@@ -41,8 +41,13 @@ func errorEnvelope(code, message string) []byte {
 // httpErrorEnvelope surfaces an upstream-facing failure with a concrete HTTP
 // status so the host maps it onto the client response instead of a 500.
 func httpErrorEnvelope(status int, message string) []byte {
+	return codedErrorEnvelope(status, "upstream_error", message)
+}
+
+// codedErrorEnvelope is httpErrorEnvelope with an explicit error code.
+func codedErrorEnvelope(status int, code, message string) []byte {
 	raw, _ := json.Marshal(envelope{OK: false, Error: &envelopeError{
-		Code:       "upstream_error",
+		Code:       code,
 		Message:    message,
 		HTTPStatus: status,
 	}})

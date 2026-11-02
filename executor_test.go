@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -98,5 +100,74 @@ func TestSanitizeSessionID(t *testing.T) {
 		if _, ok := sanitizeSessionID(bad); ok {
 			t.Fatalf("%q should be rejected", bad)
 		}
+	}
+}
+
+func TestLockedModelEnvelope(t *testing.T) {
+	defer resetCatalog()
+	defer setPluginConfig(nil)
+	applyRemoteCatalog([]remoteModel{
+		{ID: "vendor/gated-model", Category: "opensource", MinimumPlan: planRefFor("individual-goat")},
+	}, planContext{filter: true, planID: "individual-go-v1"}, 900)
+
+	env := lockedModelEnvelope("vendor/gated-model")
+	if env == nil {
+		t.Fatal("locked model must produce a rejection envelope")
+	}
+	var parsed envelope
+	if err := json.Unmarshal(env, &parsed); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if parsed.OK || parsed.Error == nil {
+		t.Fatalf("expected error envelope, got %s", env)
+	}
+	if parsed.Error.Code != "model_not_in_plan" || parsed.Error.HTTPStatus != http.StatusForbidden {
+		t.Fatalf("code/status = %q/%d, want model_not_in_plan/403", parsed.Error.Code, parsed.Error.HTTPStatus)
+	}
+	if !strings.Contains(parsed.Error.Message, "GOAT") || !strings.Contains(parsed.Error.Message, "individual-goat") {
+		t.Fatalf("message should name the required plan, got %q", parsed.Error.Message)
+	}
+
+	if env := lockedModelEnvelope("vendor/other-model"); env != nil {
+		t.Fatalf("unlocked model must pass, got %s", env)
+	}
+
+	setPluginConfig([]byte("filter_locked_models: false\n"))
+	if env := lockedModelEnvelope("vendor/gated-model"); env != nil {
+		t.Fatalf("switched-off filter must pass locked models, got %s", env)
+	}
+}
+
+func TestHandleExecuteRejectsLockedModel(t *testing.T) {
+	defer resetCatalog()
+	defer setPluginConfig(nil)
+	applyRemoteCatalog([]remoteModel{
+		{ID: "vendor/gated-model", Category: "opensource", MinimumPlan: planRefFor("individual-goat")},
+	}, planContext{filter: true, planID: "individual-go-v1"}, 900)
+
+	oldCall := hostCall
+	defer func() { hostCall = oldCall }()
+	hostCall = func(method string, _ any) (json.RawMessage, error) {
+		t.Fatalf("locked model must not reach the upstream, got host call %s", method)
+		return nil, nil
+	}
+
+	payload, _ := json.Marshal(map[string]any{"model": "vendor/gated-model", "messages": []map[string]any{{"role": "user", "content": "hi"}}, "stream": false})
+	request, _ := json.Marshal(executorRequest{
+		AuthID:         "auth-1",
+		StorageJSON:    []byte(`{"type":"commandcode-go","api_key":"sk-test"}`),
+		Payload:        payload,
+		HostCallbackID: "cb-1",
+	})
+	response, errRPC := handleExecute(request)
+	if errRPC != nil {
+		t.Fatalf("handleExecute rpc error: %v", errRPC)
+	}
+	var parsed envelope
+	if err := json.Unmarshal(response, &parsed); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if parsed.OK || parsed.Error == nil || parsed.Error.Code != "model_not_in_plan" || parsed.Error.HTTPStatus != http.StatusForbidden {
+		t.Fatalf("expected 403 model_not_in_plan envelope, got %s", response)
 	}
 }

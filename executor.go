@@ -142,6 +142,25 @@ func decodeChatRequest(req executorRequest) (*chatRequest, string, error) {
 	return &chat, model, nil
 }
 
+// lockedModelEnvelope rejects requests that name a model the current
+// subscription cannot use — the same gate the CLI applies client-side
+// (MODEL_NOT_IN_PLAN), so clients get an explicit reason instead of the
+// upstream's opaque 403. Nil means the model may proceed.
+func lockedModelEnvelope(model string) []byte {
+	if !activeConfig().FilterLockedModels {
+		return nil
+	}
+	required, locked := modelLockReason(model)
+	if !locked {
+		return nil
+	}
+	message := fmt.Sprintf("commandcode-go: model %q is not available on the current plan", model)
+	if required != "" {
+		message = fmt.Sprintf("commandcode-go: model %q is not available on the current plan (requires %s, %s)", model, planDisplayName(required), required)
+	}
+	return codedErrorEnvelope(http.StatusForbidden, "model_not_in_plan", message)
+}
+
 // handleExecute runs one non-streaming generation: the upstream is always
 // streaming, so the same event pump feeds the OpenAI non-streaming aggregator.
 // Nothing has been sent to the client at this point, so every failure path can
@@ -161,6 +180,9 @@ func handleExecute(request []byte) ([]byte, error) {
 	}
 	cfg := activeConfig()
 	body := toCCRequest(chat, sessionThreadID(req))
+	if env := lockedModelEnvelope(body.Params.Model); env != nil {
+		return env, nil
+	}
 
 	started := time.Now()
 	rec := requestRecord{AuthID: req.AuthID, Model: body.Params.Model, At: started}
@@ -233,6 +255,9 @@ func handleExecuteStream(request []byte) ([]byte, error) {
 	}
 	cfg := activeConfig()
 	body := toCCRequest(chat, sessionThreadID(req))
+	if env := lockedModelEnvelope(body.Params.Model); env != nil {
+		return env, nil
+	}
 	started := time.Now()
 	rec := requestRecord{AuthID: req.AuthID, Model: body.Params.Model, Stream: true, At: started}
 	open, errOpen := openUpstreamStream(req.HostCallbackID, resolveAPIBase(creds.APIBase, cfg.APIBase), creds.APIKey, req.AuthID, &body)
