@@ -4,6 +4,9 @@
 - （暂无）
 
 ## Next（近期候选，最多 10 条）
+- [ ] 修复存量测试竞态与缓存污染（独立于锁定过滤）：version 后台 npm 查询 goroutine 与测试替换 lookupCLIVersion 的 data race（触发入口不止 TestCLIVersionPinning，quota_test fetchQuotaFromBilling→currentCLIVersion 同样可触发，-race 单轮即可能失败）；TestQuotaCacheTTL 在 -count>1 下同进程 quotaCache 污染
+  - status: todo
+  - context: archives/conversations/cliproxy-commandcode-go-plugin.md
 - [ ] 会话亲和的生产端到端验证（同一会话头连发两次请求，确认上游 x-session-id 复用）
   - status: todo
   - context: archives/conversations/cliproxy-commandcode-go-plugin.md
