@@ -4,7 +4,7 @@
 - [x] quota-hub 全链路实施（阶段1-5）：独立额度守护进程 + ZCode 原生弹层，旧注入链路已退役
   - status: done
   - context: archives/conversations/zcode-quota-hub-design.md
-  - 最终交付：quota-hub v0.1.0（~/src/quota-hub，daemon=com.quota-hub + ZCode 3.17.2 三层补丁正式上线）；ZCODE_BASE_URL 已撤销、com.cc-quota-proxy 已停用归档；回滚材料=pristine asar + patch --restore + 工厂整包；ZCode 升级后补丁需按 README 方法重适配
+  - 最终交付：quota-hub v0.1.0（~/src/quota-hub，daemon=com.quota-hub + ZCode 3.17.2 三层补丁正式上线）；ZCODE_BASE_URL 已撤销、com.cc-quota-proxy 已停用归档；回滚材料=pristine asar + patch --restore + 工厂整包；ZCode 升级后补丁需按 README 方法重适配；历史 PoC 脚本（旧静态代理 cc-quota-proxy、首版 patch.mjs）已入库 scripts/ 作为证据保留
   - context: archives/conversations/zcode-quota-hub-design.md
   - 架构决策（2026-11-03，与用户确认）：quota-hub 不实现为 CPA 插件，改为独立守护进程（Go 二进制 + LaunchAgent，仓库 ~/src/quota-hub，运行时目录 ~/.quota-hub）。与 CPA 唯一交互是本机管理 API；模型→账号映射用 auth-files ⊕ 逐账号 auth-files/models（与 host.auth.models 同源，全局 registry）。消除 dylib ABI 耦合、宿主内死锁/重入风险、validPlugin 假能力 hack、改生产 CPA 配置的需求
   - 进展（2026-11-03）：**阶段1/2/3 验收全部通过**。PoC 实测修复两处（auth-files 不带 quota_plugin_id→GET /v0/management/quota/providers 合并；wham/usage reset_at 为 unix 秒→flexInstant 兼容）；make install 部署（~/.local/bin + com.quota-hub）；curl 验收全过（CC plan=individual-go-v1 5h/7d/月度、Codex prolite weekly 6.0%、缓存 TTL/refresh、错误密钥文案、CPA 停止→自愈、unmapped 不猜测）；弹层 CDP hover 验证官方区与 CPA 分区并存、daemon 收到弹层查询（官方模型 GLM-5.3→unmapped 文案符合设计）。CC 模型真实数据条已确认；此后按用户反馈完成五轮 UI 迭代（provider 收敛/unmapped 隐藏/缓存先显+冷却期/新建会话入口/官方三列排版/7d 每周映射/跨天仅日期/无上下文去分隔线/去模型名），全部确认通过，注入模板已提交
