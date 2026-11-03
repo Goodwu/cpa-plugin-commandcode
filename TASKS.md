@@ -5,9 +5,9 @@
   - status: in_progress
   - context: archives/conversations/zcode-quota-hub-design.md
   - 架构决策（2026-11-03，与用户确认）：quota-hub 不实现为 CPA 插件，改为独立守护进程（Go 二进制 + LaunchAgent，仓库 ~/src/quota-hub，运行时目录 ~/.quota-hub）。与 CPA 唯一交互是本机管理 API；模型→账号映射用 auth-files ⊕ 逐账号 auth-files/models（与 host.auth.models 同源，全局 registry）。消除 dylib ABI 耦合、宿主内死锁/重入风险、validPlugin 假能力 hack、改生产 CPA 配置的需求
-  - 进展（2026-11-03）：阶段2 代码完成（daemon 全功能+race 全绿+无密钥降级实测）；阶段3 隔离副本验证通过（三层注入 31,826 文件比对、UI 无回归、CDP 主世界 window.quotaHub 与原生桥并存、capabilities/query/非法参数全通过、daemon 收到真实 query、a2t 捕获当前模型）；两次提交于 ~/src/quota-hub
-  - 下一步：用户提供管理密钥（写入 ~/.quota-hub/management.key，0600）→ quota-hub -poc（阶段1）→ make install 部署+curl 真实额度验收（阶段2）→ 弹层真实数据视觉验证 → 可信 3.17.2 原件 → 正式应用补丁（阶段4）→ 验收并撤销 ZCODE_BASE_URL + com.cc-quota-proxy（阶段5）
-  - 阻塞点：管理密钥明文、阶段4可信原件来源、阶段5停旧链路确认
+  - 进展（2026-11-03）：**阶段1/2/3 验收全部通过**。PoC 实测修复两处（auth-files 不带 quota_plugin_id→GET /v0/management/quota/providers 合并；wham/usage reset_at 为 unix 秒→flexInstant 兼容）；make install 部署（~/.local/bin + com.quota-hub）；curl 验收全过（CC plan=individual-go-v1 5h/7d/月度、Codex prolite weekly 6.0%、缓存 TTL/refresh、错误密钥文案、CPA 停止→自愈、unmapped 不猜测）；弹层 CDP hover 验证官方区与 CPA 分区并存、daemon 收到弹层查询（官方模型 GLM-5.3→unmapped 文案符合设计）。CC 模型真实数据条视觉待正式补丁后确认
+  - 下一步（阶段4/5）：可信 3.17.2 原件（官方 dmg 重取或确认现有 pristine+当前应用为基准）→ 正式应用补丁+回滚演练（重启 ZCode 会断当前会话，需用户确认时机）→ CC 模型弹层真实数据视觉确认 → 撤销 ZCODE_BASE_URL + 停 com.cc-quota-proxy → 收尾归档
+  - 阻塞点：阶段4可信原件来源、打补丁时机（重启 ZCode）、阶段5停旧链路确认
 
 ## Next（近期候选，最多 10 条）
 - [ ] 修复存量测试竞态与缓存污染（独立于锁定过滤）：version 后台 npm 查询 goroutine 与测试替换 lookupCLIVersion 的 data race（触发入口不止 TestCLIVersionPinning，quota_test fetchQuotaFromBilling→currentCLIVersion 同样可触发，-race 单轮即可能失败）；TestQuotaCacheTTL 在 -count>1 下同进程 quotaCache 污染
